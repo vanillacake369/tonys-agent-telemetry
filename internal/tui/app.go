@@ -57,8 +57,8 @@ const (
 func NewApp() App {
 	keys := DefaultKeyMap()
 	tabs := map[Tab]TabModel{
-		TabSessions: newPlaceholderTab("Sessions"),
-		TabAgents:   newPlaceholderTab("Agents"),
+		TabSessions: NewSessionsTab(),
+		TabAgents:   NewAgentsTab(),
 		TabDAG:      newPlaceholderTab("DAG"),
 		TabSkills:   newPlaceholderTab("Skills"),
 	}
