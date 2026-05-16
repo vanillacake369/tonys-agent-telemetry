@@ -42,15 +42,22 @@ type TabModel interface {
 	SetSize(width, height int) TabModel
 }
 
+// SearchFocusMsg is sent to a tab to tell it to focus its search input.
+type SearchFocusMsg struct{}
+
+// SearchBlurMsg is sent to a tab to tell it to blur its search input.
+type SearchBlurMsg struct{}
+
 // App is the root Bubble Tea model managing tab switching.
 type App struct {
-	activeTab  Tab
-	tabs       map[Tab]TabModel
-	keys       KeyMap
-	width      int
-	height     int
-	fifoEvents <-chan event.Event // nil when FIFO is not active
-	fifoCancel context.CancelFunc
+	activeTab     Tab
+	tabs          map[Tab]TabModel
+	keys          KeyMap
+	width         int
+	height        int
+	searchFocused bool // when true, key events pass directly to the active tab
+	fifoEvents    <-chan event.Event // nil when FIFO is not active
+	fifoCancel    context.CancelFunc
 }
 
 const (
@@ -68,9 +75,10 @@ func NewApp() App {
 		TabSkills:   NewSkillsTab(),
 	}
 	return App{
-		activeTab: TabSessions,
-		tabs:      tabs,
-		keys:      keys,
+		activeTab:     TabSessions,
+		tabs:          tabs,
+		keys:          keys,
+		searchFocused: false,
 	}
 }
 
@@ -117,23 +125,69 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case tea.KeyMsg:
-		// Global tab-switching keys are intercepted before delegating to sub-models.
-		switch {
-		case key.Matches(msg, a.keys.Quit):
-			return a, tea.Quit
-		case key.Matches(msg, a.keys.TabSessions):
-			a.activeTab = TabSessions
-			return a, nil
-		case key.Matches(msg, a.keys.TabAgents):
-			a.activeTab = TabAgents
-			return a, nil
-		case key.Matches(msg, a.keys.TabDAG):
-			a.activeTab = TabDAG
-			return a, nil
-		case key.Matches(msg, a.keys.TabSkills):
-			a.activeTab = TabSkills
+		// Esc always unfocuses search, regardless of current mode.
+		if key.Matches(msg, a.keys.Escape) {
+			if a.searchFocused {
+				a.searchFocused = false
+				updated, cmd := a.tabs[a.activeTab].Update(SearchBlurMsg{})
+				a.tabs[a.activeTab] = updated
+				return a, cmd
+			}
 			return a, nil
 		}
+
+		// Ctrl+C always quits.
+		if msg.Type == tea.KeyCtrlC {
+			return a, tea.Quit
+		}
+
+		// Tab / Shift+Tab cycle tabs regardless of search focus.
+		if key.Matches(msg, a.keys.NextTab) {
+			a.activeTab = (a.activeTab + 1) % 4
+			return a, nil
+		}
+		if key.Matches(msg, a.keys.PrevTab) {
+			a.activeTab = (a.activeTab + 3) % 4
+			return a, nil
+		}
+
+		// When search is focused, pass all remaining keys to the active tab.
+		if a.searchFocused {
+			updated, cmd := a.tabs[a.activeTab].Update(msg)
+			a.tabs[a.activeTab] = updated
+			return a, cmd
+		}
+
+		// Navigation mode: "/" focuses search.
+		if key.Matches(msg, a.keys.Search) {
+			a.searchFocused = true
+			updated, cmd := a.tabs[a.activeTab].Update(SearchFocusMsg{})
+			a.tabs[a.activeTab] = updated
+			return a, cmd
+		}
+
+		// Navigation mode: number keys switch tabs.
+		switch {
+		case key.Matches(msg, a.keys.Tab1):
+			a.activeTab = TabSessions
+			return a, nil
+		case key.Matches(msg, a.keys.Tab2):
+			a.activeTab = TabAgents
+			return a, nil
+		case key.Matches(msg, a.keys.Tab3):
+			a.activeTab = TabDAG
+			return a, nil
+		case key.Matches(msg, a.keys.Tab4):
+			a.activeTab = TabSkills
+			return a, nil
+		case key.Matches(msg, a.keys.Quit):
+			return a, tea.Quit
+		}
+
+		// Delegate all other navigation-mode keys to the active tab.
+		updated, cmd := a.tabs[a.activeTab].Update(msg)
+		a.tabs[a.activeTab] = updated
+		return a, cmd
 	}
 
 	// Delegate remaining messages to the active tab.
@@ -181,29 +235,40 @@ func (a App) propagateSize() App {
 func (a App) tabHints() string {
 	switch a.activeTab {
 	case TabSessions:
-		return "Enter:resume  ^F:fork  ^Y:copy  ^R:refresh"
+		return "↵:resume  f:fork  y:copy  r:refresh"
 	case TabAgents:
-		return "Enter:launch  ^Y:copy  ^R:refresh"
+		return "↵:launch  y:copy  r:refresh"
 	case TabDAG:
 		return "◄►:switch  ↑↓:scroll"
 	case TabSkills:
-		return "Enter:analyze  ^T:sort  ^Y:copy  ^R:refresh"
+		return "↵:analyze  s:sort  y:copy  r:refresh"
 	}
 	return ""
 }
 
 // renderTabBar returns the tab bar string for the given active tab and total width.
+// Uses k9s/btop-style numbered tabs: "1:Sessions │ 2:Agents │ 3:DAG │ 4:Skills"
 func renderTabBar(active Tab, width int) string {
+	tabDefs := []struct {
+		num string
+		tab Tab
+	}{
+		{"1", TabSessions},
+		{"2", TabAgents},
+		{"3", TabDAG},
+		{"4", TabSkills},
+	}
+
 	var parts []string
-	for i, tab := range tabOrder {
-		label := tabNames[tab]
+	for i, td := range tabDefs {
+		label := td.num + ":" + tabNames[td.tab]
 		var rendered string
-		if tab == active {
+		if td.tab == active {
 			rendered = ActiveTabStyle.Render(label)
 		} else {
 			rendered = InactiveTabStyle.Render(label)
 		}
-		if i < len(tabOrder)-1 {
+		if i < len(tabDefs)-1 {
 			rendered += TabSeparatorStyle.Render(tabSeparator)
 		}
 		parts = append(parts, rendered)
@@ -212,20 +277,29 @@ func renderTabBar(active Tab, width int) string {
 	return TabBarStyle.Width(width).Render(bar)
 }
 
-// renderStatusBar returns a merged status bar showing both global and tab hints.
+// renderStatusBar returns a merged status bar showing mode indicator and key hints.
 func (a App) renderStatusBar(width int) string {
-	globalHints := "^S:sessions  ^A:agents  ^D:dag  ^K:skills"
-	tabSpecific := a.tabHints()
-	quitHint := "q:quit"
+	var help string
 
-	var parts []string
-	parts = append(parts, globalHints)
-	if tabSpecific != "" {
-		parts = append(parts, tabSpecific)
+	if a.searchFocused {
+		// Search mode indicator.
+		help = " SEARCH │ type to filter │ esc:back"
+	} else {
+		// Normal mode: show tab switching hints and context-specific hints.
+		globalHints := "NORMAL │ 1:sessions 2:agents 3:dag 4:skills"
+		tabSpecific := a.tabHints()
+		quitHint := "/:search  q:quit"
+
+		var parts []string
+		parts = append(parts, globalHints)
+		if tabSpecific != "" {
+			parts = append(parts, tabSpecific)
+		}
+		parts = append(parts, quitHint)
+
+		help = strings.Join(parts, "  │  ")
 	}
-	parts = append(parts, quitHint)
 
-	help := strings.Join(parts, "  │  ")
 	innerWidth := max(0, width-StatusBarStyle.GetHorizontalPadding())
 	return StatusBarStyle.Width(width).Render(
 		lipgloss.PlaceHorizontal(innerWidth, lipgloss.Left, help),

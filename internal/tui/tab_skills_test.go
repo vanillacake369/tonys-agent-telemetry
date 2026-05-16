@@ -108,22 +108,22 @@ func TestSkillsTab_SortToggle_CyclesModes(t *testing.T) {
 		t.Errorf("initial sortBy = %d, want SortByStars(0)", s.sortBy)
 	}
 
-	// Ctrl+T should advance to SortByCreated.
-	s, _ = updateSkillsTab(t, s, tea.KeyMsg{Type: tea.KeyCtrlT})
+	// "s" (when search unfocused) should advance to SortByCreated.
+	s, _ = updateSkillsTab(t, s, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	if s.sortBy != skill.SortByCreated {
-		t.Errorf("sortBy after 1st Ctrl+T = %d, want SortByCreated(1)", s.sortBy)
+		t.Errorf("sortBy after 1st 's' = %d, want SortByCreated(1)", s.sortBy)
 	}
 
-	// Second Ctrl+T → SortByUpdated.
-	s, _ = updateSkillsTab(t, s, tea.KeyMsg{Type: tea.KeyCtrlT})
+	// Second "s" → SortByUpdated.
+	s, _ = updateSkillsTab(t, s, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	if s.sortBy != skill.SortByUpdated {
-		t.Errorf("sortBy after 2nd Ctrl+T = %d, want SortByUpdated(2)", s.sortBy)
+		t.Errorf("sortBy after 2nd 's' = %d, want SortByUpdated(2)", s.sortBy)
 	}
 
-	// Third Ctrl+T → back to SortByStars.
-	s, _ = updateSkillsTab(t, s, tea.KeyMsg{Type: tea.KeyCtrlT})
+	// Third "s" → back to SortByStars.
+	s, _ = updateSkillsTab(t, s, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	if s.sortBy != skill.SortByStars {
-		t.Errorf("sortBy after 3rd Ctrl+T = %d, want SortByStars(0)", s.sortBy)
+		t.Errorf("sortBy after 3rd 's' = %d, want SortByStars(0)", s.sortBy)
 	}
 }
 
@@ -215,7 +215,8 @@ func TestSkillsTab_Refresh_ResetsState(t *testing.T) {
 	s := NewSkillsTab()
 	s, _ = updateSkillsTab(t, s, LocalSkillsLoadedMsg{Skills: makeTestSkillsList(), Err: nil})
 
-	updated, cmd := updateSkillsTab(t, s, tea.KeyMsg{Type: tea.KeyCtrlR})
+	// "r" triggers refresh when search is unfocused.
+	updated, cmd := updateSkillsTab(t, s, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 	if !updated.loading {
 		t.Error("loading should be true after refresh")
 	}
@@ -233,10 +234,53 @@ func TestSkillsTab_View_ContainsHints(t *testing.T) {
 	s = s.SetSize(120, 30).(SkillsTab)
 
 	view := s.View()
-	for _, hint := range []string{"Enter:analyze", "^T:sort", "^Y:copy", "^R:refresh"} {
+	for _, hint := range []string{"↵:analyze", "s:sort", "y:copy", "r:refresh"} {
 		if !strings.Contains(view, hint) {
 			t.Errorf("View() missing hint %q", hint)
 		}
+	}
+}
+
+func TestSkillsTab_SearchFocusMsg_FocusesInput(t *testing.T) {
+	s := NewSkillsTab()
+	s, _ = updateSkillsTab(t, s, LocalSkillsLoadedMsg{Skills: makeTestSkillsList(), Err: nil})
+
+	if s.searchInput.Focused() {
+		t.Error("searchInput should not be focused initially")
+	}
+
+	s, _ = updateSkillsTab(t, s, SearchFocusMsg{})
+	if !s.searchInput.Focused() {
+		t.Error("searchInput should be focused after SearchFocusMsg")
+	}
+}
+
+func TestSkillsTab_SearchBlurMsg_BlursInput(t *testing.T) {
+	s := NewSkillsTab()
+	s, _ = updateSkillsTab(t, s, LocalSkillsLoadedMsg{Skills: makeTestSkillsList(), Err: nil})
+
+	s, _ = updateSkillsTab(t, s, SearchFocusMsg{})
+	s, _ = updateSkillsTab(t, s, SearchBlurMsg{})
+	if s.searchInput.Focused() {
+		t.Error("searchInput should be blurred after SearchBlurMsg")
+	}
+}
+
+func TestSkillsTab_SortIgnoredWhenSearchFocused(t *testing.T) {
+	s := NewSkillsTab()
+	s, _ = updateSkillsTab(t, s, LocalSkillsLoadedMsg{Skills: makeTestSkillsList(), Err: nil})
+	initialSort := s.sortBy
+
+	// Focus search first.
+	s, _ = updateSkillsTab(t, s, SearchFocusMsg{})
+
+	// "s" should go to search input, not trigger sort.
+	s, _ = updateSkillsTab(t, s, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	if s.sortBy != initialSort {
+		t.Errorf("sortBy changed while search focused: got %d, want %d", s.sortBy, initialSort)
+	}
+	if s.searchInput.Value() != "s" {
+		t.Errorf("searchInput.Value() = %q, want 's' (char should go to search when focused)", s.searchInput.Value())
 	}
 }
 

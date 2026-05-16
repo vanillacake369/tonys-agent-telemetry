@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -274,36 +275,21 @@ func parseQueueStatus(content json.RawMessage) (taskID, status string) {
 	return taskID, status
 }
 
-// ParseDAG reads a full session JSONL and its subagent files to build a DAG.
+// ParseDAG reads a session JSONL file and its corresponding subagent files to build a DAG.
 // Agent tool_use events create child nodes. queue-operation events update status.
 // Returns the root node. If no subagents are found, the root is a single node.
-func ParseDAG(sessionDir string) (*DAGNode, error) {
-	// sessionDir is the directory containing the session JSONL and the
-	// session subdirectory (which has the subagents/ folder).
-	//
-	// Locate the main JSONL: sessionDir/<id>.jsonl
-	// Subagents: sessionDir/<id>/subagents/agent-<id>.meta.json
-	//
-	// In practice the caller passes the directory that contains the JSONL.
-	// The subdirectory with the same name as the session UUID holds subagents.
+//
+// sessionFilePath is the path to the session .jsonl file.
+// The subagents directory is at: {projectDir}/{sessionID}/subagents/
+func ParseDAG(sessionFilePath string) (*DAGNode, error) {
+	sessionID := strings.TrimSuffix(filepath.Base(sessionFilePath), ".jsonl")
+	projectDir := filepath.Dir(sessionFilePath)
 
-	// Find the main session JSONL in sessionDir.
-	entries, err := os.ReadDir(sessionDir)
-	if err != nil {
-		return nil, fmt.Errorf("ReadDir %s: %w", sessionDir, err)
-	}
+	mainJSONL := sessionFilePath
 
-	var mainJSONL string
-	var sessionID string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
-			mainJSONL = sessionDir + "/" + e.Name()
-			sessionID = strings.TrimSuffix(e.Name(), ".jsonl")
-			break
-		}
-	}
-	if mainJSONL == "" {
-		return nil, fmt.Errorf("no .jsonl file found in %s", sessionDir)
+	// Verify the file exists.
+	if _, err := os.Stat(mainJSONL); err != nil {
+		return nil, fmt.Errorf("session file not found %s: %w", mainJSONL, err)
 	}
 
 	root := &DAGNode{
@@ -398,7 +384,7 @@ func ParseDAG(sessionDir string) (*DAGNode, error) {
 	}
 
 	// Load subagent metadata to populate IDs and resolve statuses.
-	subagentsDir := sessionDir + "/" + sessionID + "/subagents"
+	subagentsDir := projectDir + "/" + sessionID + "/subagents"
 	if subEntries, err := os.ReadDir(subagentsDir); err == nil {
 		for _, e := range subEntries {
 			if e.IsDir() || !strings.HasSuffix(e.Name(), ".meta.json") {

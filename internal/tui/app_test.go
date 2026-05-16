@@ -26,16 +26,16 @@ func TestApp_InitialTab(t *testing.T) {
 	}
 }
 
-func TestApp_TabSwitching(t *testing.T) {
+func TestApp_TabSwitchingByNumber(t *testing.T) {
 	cases := []struct {
 		name    string
 		key     tea.KeyMsg
 		wantTab Tab
 	}{
-		{"ctrl+s -> Sessions", tea.KeyMsg{Type: tea.KeyCtrlS}, TabSessions},
-		{"ctrl+a -> Agents", tea.KeyMsg{Type: tea.KeyCtrlA}, TabAgents},
-		{"ctrl+d -> DAG", tea.KeyMsg{Type: tea.KeyCtrlD}, TabDAG},
-		{"ctrl+k -> Skills", tea.KeyMsg{Type: tea.KeyCtrlK}, TabSkills},
+		{"1 -> Sessions", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}}, TabSessions},
+		{"2 -> Agents", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}}, TabAgents},
+		{"3 -> DAG", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}}, TabDAG},
+		{"4 -> Skills", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}}, TabSkills},
 	}
 
 	for _, tc := range cases {
@@ -52,15 +52,15 @@ func TestApp_TabSwitching(t *testing.T) {
 func TestApp_TabSwitchingRoundTrip(t *testing.T) {
 	a := NewApp()
 
-	// Navigate through all tabs and back.
+	// Navigate through all tabs and back using number keys.
 	steps := []struct {
 		key     tea.KeyMsg
 		wantTab Tab
 	}{
-		{tea.KeyMsg{Type: tea.KeyCtrlA}, TabAgents},
-		{tea.KeyMsg{Type: tea.KeyCtrlD}, TabDAG},
-		{tea.KeyMsg{Type: tea.KeyCtrlK}, TabSkills},
-		{tea.KeyMsg{Type: tea.KeyCtrlS}, TabSessions},
+		{tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}}, TabAgents},
+		{tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}}, TabDAG},
+		{tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}}, TabSkills},
+		{tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}}, TabSessions},
 	}
 
 	for _, step := range steps {
@@ -70,6 +70,74 @@ func TestApp_TabSwitchingRoundTrip(t *testing.T) {
 		if a.activeTab != step.wantTab {
 			t.Errorf("after key %v: activeTab = %d, want %d", step.key, a.activeTab, step.wantTab)
 		}
+	}
+}
+
+func TestApp_TabCyclingWithTabKey(t *testing.T) {
+	a := NewApp()
+	// Start at Sessions (0), Tab should advance forward.
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyTab})
+	if a.activeTab != TabAgents {
+		t.Errorf("Tab from Sessions: activeTab = %d, want %d (TabAgents)", a.activeTab, TabAgents)
+	}
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyTab})
+	if a.activeTab != TabDAG {
+		t.Errorf("Tab from Agents: activeTab = %d, want %d (TabDAG)", a.activeTab, TabDAG)
+	}
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyTab})
+	if a.activeTab != TabSkills {
+		t.Errorf("Tab from DAG: activeTab = %d, want %d (TabSkills)", a.activeTab, TabSkills)
+	}
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyTab})
+	if a.activeTab != TabSessions {
+		t.Errorf("Tab from Skills (wrap): activeTab = %d, want %d (TabSessions)", a.activeTab, TabSessions)
+	}
+}
+
+func TestApp_TabCyclingWithShiftTabKey(t *testing.T) {
+	a := NewApp()
+	// Start at Sessions (0), Shift+Tab should go backward (wrap to Skills).
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if a.activeTab != TabSkills {
+		t.Errorf("Shift+Tab from Sessions: activeTab = %d, want %d (TabSkills)", a.activeTab, TabSkills)
+	}
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if a.activeTab != TabDAG {
+		t.Errorf("Shift+Tab from Skills: activeTab = %d, want %d (TabDAG)", a.activeTab, TabDAG)
+	}
+}
+
+func TestApp_SearchFocusUnfocusCycle(t *testing.T) {
+	a := NewApp()
+	if a.searchFocused {
+		t.Error("searchFocused should be false initially")
+	}
+
+	// "/" should focus search.
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	if !a.searchFocused {
+		t.Error("searchFocused should be true after '/'")
+	}
+
+	// Esc should unfocus search.
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyEsc})
+	if a.searchFocused {
+		t.Error("searchFocused should be false after Esc")
+	}
+}
+
+func TestApp_NumberKeysIgnoredWhenSearchFocused(t *testing.T) {
+	a := NewApp()
+	// Focus search.
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	if !a.searchFocused {
+		t.Fatal("expected searchFocused = true")
+	}
+
+	// Pressing "2" while search is focused should NOT switch tabs.
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	if a.activeTab != TabSessions {
+		t.Errorf("tab should not switch when search is focused: activeTab = %d", a.activeTab)
 	}
 }
 
@@ -138,12 +206,44 @@ func TestApp_ViewContainsTabNames(t *testing.T) {
 	}
 }
 
+func TestApp_ViewContainsNumberedTabPrefixes(t *testing.T) {
+	a := NewApp()
+	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 80, Height: 24})
+	view := a.View()
+	for _, prefix := range []string{"1:Sessions", "2:Agents", "3:DAG", "4:Skills"} {
+		if !strings.Contains(view, prefix) {
+			t.Errorf("View() missing numbered tab prefix %q", prefix)
+		}
+	}
+}
+
 func TestApp_ViewContainsStatusBar(t *testing.T) {
 	a := NewApp()
 	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 80, Height: 24})
 	view := a.View()
 	if !strings.Contains(view, "q:quit") {
 		t.Errorf("View() missing status bar hint 'q:quit'")
+	}
+}
+
+func TestApp_ViewStatusBarNormalMode(t *testing.T) {
+	a := NewApp()
+	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 120, Height: 24})
+	view := a.View()
+	if !strings.Contains(view, "NORMAL") {
+		t.Errorf("View() in normal mode should contain 'NORMAL', got view snippet: %s",
+			view[len(view)-200:])
+	}
+}
+
+func TestApp_ViewStatusBarSearchMode(t *testing.T) {
+	a := NewApp()
+	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 120, Height: 24})
+	// Focus search.
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	view := a.View()
+	if !strings.Contains(view, "SEARCH") {
+		t.Errorf("View() in search mode should contain 'SEARCH'")
 	}
 }
 
@@ -156,7 +256,7 @@ func TestApp_InitReturnsCmd(t *testing.T) {
 func TestApp_TabSwitchDoesNotLoseSize(t *testing.T) {
 	a := NewApp()
 	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 100, Height: 30})
-	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyCtrlA})
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	if a.width != 100 || a.height != 30 {
 		t.Errorf("size lost after tab switch: width=%d height=%d", a.width, a.height)
 	}

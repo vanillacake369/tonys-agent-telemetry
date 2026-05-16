@@ -59,8 +59,7 @@ type SkillsTab struct {
 // NewSkillsTab creates an initialised SkillsTab.
 func NewSkillsTab() SkillsTab {
 	ti := textinput.New()
-	ti.Placeholder = "Search skills..."
-	ti.Focus()
+	ti.Placeholder = "Search skills... (press / to focus)"
 	ti.CharLimit = 200
 	ti.Width = 40
 
@@ -121,7 +120,36 @@ func (t SkillsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		}
 		return t, nil
 
+	case SearchFocusMsg:
+		t.searchInput.Focus()
+		return t, textinput.Blink
+
+	case SearchBlurMsg:
+		t.searchInput.Blur()
+		return t, nil
+
 	case tea.KeyMsg:
+		// When search input is focused, forward keys to the text input.
+		if t.searchInput.Focused() {
+			prevQuery := t.searchInput.Value()
+			var inputCmd tea.Cmd
+			t.searchInput, inputCmd = t.searchInput.Update(msg)
+			cmds = append(cmds, inputCmd)
+
+			if t.searchInput.Value() != prevQuery {
+				t.lastKeystroke = time.Now()
+				query := t.searchInput.Value()
+				sortBy := t.sortBy
+				// Debounce: schedule a search after 300ms.
+				cmds = append(cmds, func() tea.Msg {
+					time.Sleep(300 * time.Millisecond)
+					return skillsDebounceMsg{query: query, sortBy: sortBy}
+				})
+			}
+			return t, tea.Batch(cmds...)
+		}
+
+		// Navigation mode: handle single-key bindings.
 		switch {
 		case key.Matches(msg, t.keys.Refresh):
 			t.loading = true
@@ -141,13 +169,13 @@ func (t SkillsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 			}
 			return t, nil
 
-		case key.Matches(msg, t.keys.CopyClip):
+		case key.Matches(msg, t.keys.Copy):
 			if len(t.filtered) > 0 && t.cursor < len(t.filtered) {
 				_ = platform.CopyToClipboard(t.filtered[t.cursor].URL)
 			}
 			return t, nil
 
-		case msg.Type == tea.KeyCtrlT:
+		case key.Matches(msg, t.keys.Sort):
 			t.sortBy = nextSortBy(t.sortBy)
 			t.cancelInFlight()
 			return t, t.searchCmd(t.searchInput.Value(), t.sortBy)
@@ -165,26 +193,9 @@ func (t SkillsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 				return t, t.loadReadmeCmd()
 			}
 			return t, nil
-
-		default:
-			// Forward to search input.
-			prevQuery := t.searchInput.Value()
-			var inputCmd tea.Cmd
-			t.searchInput, inputCmd = t.searchInput.Update(msg)
-			cmds = append(cmds, inputCmd)
-
-			if t.searchInput.Value() != prevQuery {
-				t.lastKeystroke = time.Now()
-				query := t.searchInput.Value()
-				sortBy := t.sortBy
-				// Debounce: schedule a search after 300ms.
-				cmds = append(cmds, func() tea.Msg {
-					time.Sleep(300 * time.Millisecond)
-					return skillsDebounceMsg{query: query, sortBy: sortBy}
-				})
-			}
-			return t, tea.Batch(cmds...)
 		}
+
+		return t, nil
 	}
 
 	// Forward to textinput for cursor blink, etc.
@@ -335,7 +346,7 @@ func (t SkillsTab) View() string {
 	}
 
 	splitView := RenderSplitView(left, right, leftW, rightW, listHeight, showPreview)
-	hintBar := RenderHintBar("Enter:analyze  ^T:sort  ^Y:copy  ^R:refresh", t.width)
+	hintBar := RenderHintBar("↵:analyze  s:sort  y:copy  r:refresh", t.width)
 
 	return strings.Join([]string{searchBar, "", splitView, hintBar}, "\n")
 }

@@ -67,8 +67,7 @@ type AgentsTab struct {
 // NewAgentsTab creates a new AgentsTab ready to be displayed.
 func NewAgentsTab() AgentsTab {
 	ti := textinput.New()
-	ti.Placeholder = "search agents..."
-	ti.Focus()
+	ti.Placeholder = "search agents... (press / to focus)"
 	ti.CharLimit = 64
 	ti.Width = 40
 
@@ -180,7 +179,34 @@ func (t AgentsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		}
 		return t, nil
 
+	case SearchFocusMsg:
+		t.searchInput.Focus()
+		return t, textinput.Blink
+
+	case SearchBlurMsg:
+		t.searchInput.Blur()
+		return t, nil
+
 	case tea.KeyMsg:
+		// When search input is focused, forward keys to the text input.
+		if t.searchInput.Focused() {
+			prevQuery := t.searchInput.Value()
+			var inputCmd tea.Cmd
+			t.searchInput, inputCmd = t.searchInput.Update(msg)
+			cmds = append(cmds, inputCmd)
+
+			if t.searchInput.Value() != prevQuery {
+				t.applyFilter()
+				t.cursor = 0
+				t.clampCursor()
+				if a := t.selectedAgent(); a != nil {
+					cmds = append(cmds, loadPreviewCmd(a.Name))
+				}
+			}
+			return t, tea.Batch(cmds...)
+		}
+
+		// Navigation mode: handle single-key bindings.
 		switch {
 		case key.Matches(msg, t.keys.Refresh):
 			t.loading = true
@@ -199,7 +225,7 @@ func (t AgentsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 			}
 			return t, nil
 
-		case key.Matches(msg, t.keys.CopyClip):
+		case key.Matches(msg, t.keys.Copy):
 			if a := t.selectedAgent(); a != nil {
 				if err := platform.CopyToClipboard(a.Name); err != nil {
 					t.err = err
@@ -222,24 +248,9 @@ func (t AgentsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 				cmds = append(cmds, loadPreviewCmd(a.Name))
 			}
 			return t, tea.Batch(cmds...)
-
-		default:
-			// Forward to search input.
-			prevQuery := t.searchInput.Value()
-			var inputCmd tea.Cmd
-			t.searchInput, inputCmd = t.searchInput.Update(msg)
-			cmds = append(cmds, inputCmd)
-
-			if t.searchInput.Value() != prevQuery {
-				t.applyFilter()
-				t.cursor = 0
-				t.clampCursor()
-				if a := t.selectedAgent(); a != nil {
-					cmds = append(cmds, loadPreviewCmd(a.Name))
-				}
-			}
-			return t, tea.Batch(cmds...)
 		}
+
+		return t, nil
 	}
 
 	// Forward to textinput for cursor blink etc.
@@ -282,7 +293,7 @@ func (t AgentsTab) View() string {
 	}
 
 	splitView := RenderSplitView(left, right, leftW, rightW, listHeight, showPreview)
-	hintBar := RenderHintBar("Enter:launch  ^Y:copy  ^R:refresh  ↑/↓ or j/k:navigate", t.width)
+	hintBar := RenderHintBar("↵:launch  y:copy  r:refresh  ↑/↓ or j/k:navigate", t.width)
 
 	return strings.Join([]string{searchBar, "", splitView, hintBar}, "\n")
 }

@@ -161,6 +161,66 @@ func TestScanLocal_SkillsWithDescription(t *testing.T) {
 	}
 }
 
+func TestScanLocal_FrontmatterDescription(t *testing.T) {
+	root := t.TempDir()
+
+	// Skill with YAML frontmatter description.
+	skillDir := filepath.Join(root, "skills", "planning")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	skillContent := "---\ndescription: \"Create detailed technical plans\"\n---\n# architectural-planning\nUse when designing features...\n"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillContent), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Command with YAML frontmatter description.
+	commandsDir := filepath.Join(root, "commands")
+	if err := os.MkdirAll(commandsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	commandContent := "---\ndescription: \"코드 품질, 성능, 보안을 분석하고 개선한다\"\n---\n$ARGUMENTS\n...\n"
+	if err := os.WriteFile(filepath.Join(commandsDir, "enhance.md"), []byte(commandContent), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	skills, err := scanLocalDir(root)
+	if err != nil {
+		t.Fatalf("scanLocalDir: %v", err)
+	}
+	if len(skills) != 2 {
+		t.Fatalf("got %d skills, want 2", len(skills))
+	}
+
+	byName := make(map[string]string)
+	for _, s := range skills {
+		byName[s.Name] = s.Description
+	}
+
+	if byName["planning"] != "Create detailed technical plans" {
+		t.Errorf("planning description = %q, want %q", byName["planning"], "Create detailed technical plans")
+	}
+	if byName["enhance"] != "코드 품질, 성능, 보안을 분석하고 개선한다" {
+		t.Errorf("enhance description = %q, want %q", byName["enhance"], "코드 품질, 성능, 보안을 분석하고 개선한다")
+	}
+}
+
+func TestReadFirstLine_NoDashDash(t *testing.T) {
+	// Verifies that "---" delimiters are NOT returned as descriptions.
+	f := filepath.Join(t.TempDir(), "test.md")
+	content := "---\ndescription: \"my description\"\n---\n# Title\nSome body text.\n"
+	if err := os.WriteFile(f, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	got := readFirstLine(f)
+	if got == "---" {
+		t.Error("readFirstLine returned \"---\" — frontmatter delimiter leaked as description")
+	}
+	if got != "my description" {
+		t.Errorf("readFirstLine = %q, want %q", got, "my description")
+	}
+}
+
 func TestScanLocal_RealClaudeDir_NonFatal(t *testing.T) {
 	// This test calls the real ScanLocal() — it is non-fatal because ~/.claude
 	// may not have skills/ or commands/ on CI.

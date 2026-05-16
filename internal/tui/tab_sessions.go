@@ -43,8 +43,7 @@ type SessionsTab struct {
 // NewSessionsTab creates an initialised SessionsTab.
 func NewSessionsTab() SessionsTab {
 	ti := textinput.New()
-	ti.Placeholder = "Search sessions..."
-	ti.Focus()
+	ti.Placeholder = "Search sessions... (press / to focus)"
 	ti.CharLimit = 200
 	ti.Width = 40
 
@@ -84,7 +83,29 @@ func (s SessionsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		}
 		return s, nil
 
+	case SearchFocusMsg:
+		s.searchInput.Focus()
+		return s, textinput.Blink
+
+	case SearchBlurMsg:
+		s.searchInput.Blur()
+		return s, nil
+
 	case tea.KeyMsg:
+		// When search input is focused, forward keys to the text input.
+		if s.searchInput.Focused() {
+			var tiCmd tea.Cmd
+			s.searchInput, tiCmd = s.searchInput.Update(msg)
+			cmds = append(cmds, tiCmd)
+			s.applyFilter()
+			if s.cursor >= len(s.filtered) {
+				s.cursor = max(0, len(s.filtered)-1)
+			}
+			cmds = append(cmds, s.loadPreviewCmd())
+			return s, tea.Batch(cmds...)
+		}
+
+		// Navigation mode: handle single-key bindings.
 		switch {
 		case key.Matches(msg, s.keys.Refresh):
 			s.loading = true
@@ -102,7 +123,7 @@ func (s SessionsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 			}
 			return s, nil
 
-		case key.Matches(msg, s.keys.ForkSession):
+		case key.Matches(msg, s.keys.Fork):
 			if len(s.filtered) > 0 && s.cursor < len(s.filtered) {
 				session := s.filtered[s.cursor]
 				cmd := fmt.Sprintf("claude --resume %s --fork-session", session.ID)
@@ -110,7 +131,7 @@ func (s SessionsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 			}
 			return s, nil
 
-		case key.Matches(msg, s.keys.CopyClip):
+		case key.Matches(msg, s.keys.Copy):
 			if len(s.filtered) > 0 && s.cursor < len(s.filtered) {
 				session := s.filtered[s.cursor]
 				_ = platform.CopyToClipboard(session.ID)
@@ -132,16 +153,7 @@ func (s SessionsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 			return s, nil
 		}
 
-		// Delegate remaining keys to the text input.
-		var tiCmd tea.Cmd
-		s.searchInput, tiCmd = s.searchInput.Update(msg)
-		cmds = append(cmds, tiCmd)
-		s.applyFilter()
-		if s.cursor >= len(s.filtered) {
-			s.cursor = max(0, len(s.filtered)-1)
-		}
-		cmds = append(cmds, s.loadPreviewCmd())
-		return s, tea.Batch(cmds...)
+		return s, nil
 	}
 
 	// Pass through to text input for non-key messages.
@@ -236,7 +248,7 @@ func (s SessionsTab) View() string {
 	}
 
 	splitView := RenderSplitView(left, right, leftW, rightW, listHeight, showPreview)
-	hintBar := RenderHintBar("Enter:resume  ^F:fork  ^Y:copy  ^R:refresh", s.width)
+	hintBar := RenderHintBar("↵:resume  f:fork  y:copy  r:refresh", s.width)
 
 	return strings.Join([]string{searchBar, "", splitView, hintBar}, "\n")
 }

@@ -4,65 +4,110 @@ import "github.com/charmbracelet/bubbles/key"
 
 // KeyMap defines all key bindings for the TUI.
 type KeyMap struct {
-	TabSessions key.Binding
-	TabAgents   key.Binding
-	TabDAG      key.Binding
-	TabSkills   key.Binding
-	Quit        key.Binding
-	Enter       key.Binding
-	Back        key.Binding
-	ForkSession key.Binding
-	NewSession  key.Binding
-	CopyClip    key.Binding
-	Refresh     key.Binding
+	// Tab switching (work only when search is unfocused)
+	Tab1    key.Binding // "1" → Sessions
+	Tab2    key.Binding // "2" → Agents
+	Tab3    key.Binding // "3" → DAG
+	Tab4    key.Binding // "4" → Skills
+	NextTab key.Binding // "tab" → cycle forward
+	PrevTab key.Binding // "shift+tab" → cycle backward
+
+	// Navigation
+	Up    key.Binding // "k", "up"
+	Down  key.Binding // "j", "down"
+	Left  key.Binding // "h", "left"
+	Right key.Binding // "l", "right"
+
+	// Actions (single-key, only when search is unfocused)
+	Enter   key.Binding // "enter"
+	Copy    key.Binding // "y"
+	Refresh key.Binding // "r"
+	Fork    key.Binding // "f"
+	Sort    key.Binding // "s"
+	Search  key.Binding // "/" → focus search input
+	Escape  key.Binding // "esc" → unfocus search input
+	Help    key.Binding // "?"
+	Quit    key.Binding // "q", "ctrl+c"
 }
 
 // DefaultKeyMap returns the default key bindings for the application.
 func DefaultKeyMap() KeyMap {
 	return KeyMap{
-		TabSessions: key.NewBinding(
-			key.WithKeys("ctrl+s"),
-			key.WithHelp("^S", "sessions"),
+		Tab1: key.NewBinding(
+			key.WithKeys("1"),
+			key.WithHelp("1", "sessions"),
 		),
-		TabAgents: key.NewBinding(
-			key.WithKeys("ctrl+a"),
-			key.WithHelp("^A", "agents"),
+		Tab2: key.NewBinding(
+			key.WithKeys("2"),
+			key.WithHelp("2", "agents"),
 		),
-		TabDAG: key.NewBinding(
-			key.WithKeys("ctrl+d"),
-			key.WithHelp("^D", "dag"),
+		Tab3: key.NewBinding(
+			key.WithKeys("3"),
+			key.WithHelp("3", "dag"),
 		),
-		TabSkills: key.NewBinding(
-			key.WithKeys("ctrl+k"),
-			key.WithHelp("^K", "skills"),
+		Tab4: key.NewBinding(
+			key.WithKeys("4"),
+			key.WithHelp("4", "skills"),
 		),
-		Quit: key.NewBinding(
-			key.WithKeys("q", "ctrl+c"),
-			key.WithHelp("q", "quit"),
+		NextTab: key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("tab", "next tab"),
+		),
+		PrevTab: key.NewBinding(
+			key.WithKeys("shift+tab"),
+			key.WithHelp("shift+tab", "prev tab"),
+		),
+		Up: key.NewBinding(
+			key.WithKeys("up", "k"),
+			key.WithHelp("↑/k", "up"),
+		),
+		Down: key.NewBinding(
+			key.WithKeys("down", "j"),
+			key.WithHelp("↓/j", "down"),
+		),
+		Left: key.NewBinding(
+			key.WithKeys("left", "h"),
+			key.WithHelp("←/h", "left"),
+		),
+		Right: key.NewBinding(
+			key.WithKeys("right", "l"),
+			key.WithHelp("→/l", "right"),
 		),
 		Enter: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "select"),
 		),
-		Back: key.NewBinding(
+		Copy: key.NewBinding(
+			key.WithKeys("y"),
+			key.WithHelp("y", "copy"),
+		),
+		Refresh: key.NewBinding(
+			key.WithKeys("r"),
+			key.WithHelp("r", "refresh"),
+		),
+		Fork: key.NewBinding(
+			key.WithKeys("f"),
+			key.WithHelp("f", "fork session"),
+		),
+		Sort: key.NewBinding(
+			key.WithKeys("s"),
+			key.WithHelp("s", "sort"),
+		),
+		Search: key.NewBinding(
+			key.WithKeys("/"),
+			key.WithHelp("/", "search"),
+		),
+		Escape: key.NewBinding(
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "back"),
 		),
-		ForkSession: key.NewBinding(
-			key.WithKeys("ctrl+f"),
-			key.WithHelp("^F", "fork session"),
+		Help: key.NewBinding(
+			key.WithKeys("?"),
+			key.WithHelp("?", "help"),
 		),
-		NewSession: key.NewBinding(
-			key.WithKeys("ctrl+n"),
-			key.WithHelp("^N", "new session"),
-		),
-		CopyClip: key.NewBinding(
-			key.WithKeys("ctrl+y"),
-			key.WithHelp("^Y", "copy"),
-		),
-		Refresh: key.NewBinding(
-			key.WithKeys("ctrl+r"),
-			key.WithHelp("^R", "refresh"),
+		Quit: key.NewBinding(
+			key.WithKeys("q", "ctrl+c"),
+			key.WithHelp("q", "quit"),
 		),
 	}
 }

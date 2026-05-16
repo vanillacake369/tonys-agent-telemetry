@@ -67,24 +67,71 @@ func ScanLocal() ([]Skill, error) {
 	return skills, nil
 }
 
-// readFirstLine reads the first non-empty, non-heading line from a file
-// to use as a short description.
+// readFirstLine extracts a short description from a Markdown file.
+// If the file begins with YAML frontmatter (delimited by "---"), the value of
+// the "description:" key is returned. Otherwise the first non-empty,
+// non-heading body line is used. Falls back to the first heading text.
 func readFirstLine(path string) string {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return ""
 	}
-	lines := strings.Split(string(raw), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
+	content := string(raw)
+	lines := strings.Split(content, "\n")
+
+	// Check for YAML frontmatter starting with "---".
+	if len(lines) > 0 && strings.TrimSpace(lines[0]) == "---" {
+		for i := 1; i < len(lines); i++ {
+			line := strings.TrimSpace(lines[i])
+			// Closing delimiter — stop scanning frontmatter.
+			if line == "---" {
+				break
+			}
+			// Look for a "description:" key.
+			if strings.HasPrefix(line, "description:") {
+				value := strings.TrimSpace(line[len("description:"):])
+				// Strip surrounding quotes if present.
+				if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+					value = value[1 : len(value)-1]
+				} else if len(value) >= 2 && value[0] == '\'' && value[len(value)-1] == '\'' {
+					value = value[1 : len(value)-1]
+				}
+				if len(value) > 100 {
+					value = value[:97] + "..."
+				}
+				return value
+			}
+		}
+	}
+
+	// No frontmatter description — fall back to first non-empty, non-heading body line.
+	inFrontmatter := strings.TrimSpace(lines[0]) == "---"
+	pastFrontmatter := !inFrontmatter
+	frontmatterClosed := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if i == 0 && trimmed == "---" {
 			continue
 		}
-		if len(line) > 100 {
-			line = line[:97] + "..."
+		if inFrontmatter && !frontmatterClosed {
+			if trimmed == "---" {
+				frontmatterClosed = true
+				pastFrontmatter = true
+			}
+			continue
 		}
-		return line
+		if !pastFrontmatter {
+			continue
+		}
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if len(trimmed) > 100 {
+			trimmed = trimmed[:97] + "..."
+		}
+		return trimmed
 	}
+
 	// Fall back to the first heading if no plain text found.
 	for _, line := range lines {
 		line = strings.TrimSpace(line)

@@ -95,6 +95,9 @@ func TestSessionsTab_FuzzyFilter_ReducesList(t *testing.T) {
 	sessions := makeSessions()
 	s, _ = updateSessionsTab(t, s, SessionsLoadedMsg{Sessions: sessions, Err: nil})
 
+	// Focus the search input first (mimicking "/" key behavior via the message).
+	s, _ = updateSessionsTab(t, s, SearchFocusMsg{})
+
 	// Type "homelab" into the search input — should match only the homelab session.
 	for _, ch := range "homelab" {
 		s, _ = updateSessionsTab(t, s, tea.KeyMsg{
@@ -257,8 +260,8 @@ func TestSessionsTab_Refresh_ReloadsData(t *testing.T) {
 	sessions := makeSessions()
 	s, _ = updateSessionsTab(t, s, SessionsLoadedMsg{Sessions: sessions, Err: nil})
 
-	// Ctrl+R should reset state and return a load command.
-	updated, cmd := updateSessionsTab(t, s, tea.KeyMsg{Type: tea.KeyCtrlR})
+	// "r" should reset state and return a load command (search must be unfocused).
+	updated, cmd := updateSessionsTab(t, s, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 	if !updated.loading {
 		t.Error("loading should be true after refresh")
 	}
@@ -292,9 +295,74 @@ func TestSessionsTab_View_ContainsStatusHints(t *testing.T) {
 	s = s.SetSize(80, 24).(SessionsTab)
 
 	view := s.View()
-	for _, hint := range []string{"Enter:resume", "^F:fork", "^Y:copy", "^R:refresh"} {
+	for _, hint := range []string{"↵:resume", "f:fork", "y:copy", "r:refresh"} {
 		if !strings.Contains(view, hint) {
 			t.Errorf("View() missing hint %q", hint)
 		}
+	}
+}
+
+func TestSessionsTab_SearchFocusMsg_FocusesInput(t *testing.T) {
+	s := NewSessionsTab()
+	s, _ = updateSessionsTab(t, s, SessionsLoadedMsg{Sessions: makeSessions(), Err: nil})
+
+	// Initially search is not focused.
+	if s.searchInput.Focused() {
+		t.Error("searchInput should not be focused initially")
+	}
+
+	// SearchFocusMsg should focus the search input.
+	s, _ = updateSessionsTab(t, s, SearchFocusMsg{})
+	if !s.searchInput.Focused() {
+		t.Error("searchInput should be focused after SearchFocusMsg")
+	}
+}
+
+func TestSessionsTab_SearchBlurMsg_BlursInput(t *testing.T) {
+	s := NewSessionsTab()
+	s, _ = updateSessionsTab(t, s, SessionsLoadedMsg{Sessions: makeSessions(), Err: nil})
+
+	// Focus first.
+	s, _ = updateSessionsTab(t, s, SearchFocusMsg{})
+	if !s.searchInput.Focused() {
+		t.Fatal("searchInput should be focused after SearchFocusMsg")
+	}
+
+	// Blur.
+	s, _ = updateSessionsTab(t, s, SearchBlurMsg{})
+	if s.searchInput.Focused() {
+		t.Error("searchInput should be blurred after SearchBlurMsg")
+	}
+}
+
+func TestSessionsTab_SearchFocused_NumberKeysGoToInput(t *testing.T) {
+	s := NewSessionsTab()
+	s, _ = updateSessionsTab(t, s, SessionsLoadedMsg{Sessions: makeSessions(), Err: nil})
+	s, _ = updateSessionsTab(t, s, SearchFocusMsg{})
+
+	// When search is focused, typing digits goes to the search input, not tab switching.
+	s, _ = updateSessionsTab(t, s, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	if s.searchInput.Value() != "2" {
+		t.Errorf("searchInput.Value() = %q, want '2' (digit should go to search when focused)", s.searchInput.Value())
+	}
+}
+
+func TestSessionsTab_Unfocused_RKeyRefreshes(t *testing.T) {
+	s := NewSessionsTab()
+	sessions := makeSessions()
+	s, _ = updateSessionsTab(t, s, SessionsLoadedMsg{Sessions: sessions, Err: nil})
+
+	// Ensure search is not focused.
+	if s.searchInput.Focused() {
+		t.Fatal("searchInput should not be focused initially")
+	}
+
+	// "r" should trigger refresh.
+	updated, cmd := updateSessionsTab(t, s, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	if !updated.loading {
+		t.Error("loading should be true after 'r' refresh")
+	}
+	if cmd == nil {
+		t.Error("expected non-nil cmd after 'r' refresh")
 	}
 }

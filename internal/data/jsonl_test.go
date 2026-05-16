@@ -300,7 +300,7 @@ func TestParseConversationPreview_SkipsNonConversation(t *testing.T) {
 // --- ParseDAG tests ---
 
 // mockSessionDir creates a temp dir structure for ParseDAG tests.
-// Returns the session directory path containing the JSONL file.
+// Returns the path to the session JSONL file.
 func mockSessionDir(t *testing.T, sessionID string, mainLines []string, subagents map[string]struct {
 	metaAgentType   string
 	metaDescription string
@@ -343,7 +343,8 @@ func mockSessionDir(t *testing.T, sessionID string, mainLines []string, subagent
 		}
 	}
 
-	return dir
+	// Return the path to the session JSONL file.
+	return mainPath
 }
 
 func TestParseDAG_NoSubagents(t *testing.T) {
@@ -353,9 +354,9 @@ func TestParseDAG_NoSubagents(t *testing.T) {
 		userLine(sessionID, "/tmp", "main", "1.0", "prompt", ts),
 		assistantLine(sessionID, "claude-opus-4-6", ts.Add(time.Second)),
 	}
-	dir := mockSessionDir(t, sessionID, lines, nil)
+	jsonlPath := mockSessionDir(t, sessionID, lines, nil)
 
-	root, err := ParseDAG(dir)
+	root, err := ParseDAG(jsonlPath)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -383,9 +384,9 @@ func TestParseDAG_WithSubagents(t *testing.T) {
 	}{
 		"agent-id-001": {metaAgentType: "implementer", metaDescription: "Implement the feature", status: "completed"},
 	}
-	dir := mockSessionDir(t, sessionID, lines, subagents)
+	jsonlPath := mockSessionDir(t, sessionID, lines, subagents)
 
-	root, err := ParseDAG(dir)
+	root, err := ParseDAG(jsonlPath)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -416,9 +417,9 @@ func TestParseDAG_CorruptedLines(t *testing.T) {
 		userLine(sessionID, "/tmp", "main", "1.0", "prompt", ts),
 		"ALSO BAD JSON",
 	}
-	dir := mockSessionDir(t, sessionID, lines, nil)
+	jsonlPath := mockSessionDir(t, sessionID, lines, nil)
 
-	root, err := ParseDAG(dir)
+	root, err := ParseDAG(jsonlPath)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

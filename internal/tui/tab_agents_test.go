@@ -146,6 +146,9 @@ func TestAgentsTab_FilterResetsCursor(t *testing.T) {
 	tab = sendAgentsLoaded(t, tab, makeTestAgents())
 	tab.cursor = 3
 
+	// Focus search input first (mimicking "/" key behavior via the message).
+	tab, _ = updateAgentsTab(t, tab, SearchFocusMsg{})
+
 	// Typing in search input via Update resets cursor.
 	tab, _ = updateAgentsTab(t, tab, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	// cursor should be reset or clamped to valid range.
@@ -314,15 +317,15 @@ func TestAgentsTab_ViewWithSize(t *testing.T) {
 	if view == "" {
 		t.Error("View() should not be empty")
 	}
-	// Hint bar should be present.
-	if !strings.Contains(view, "Enter:launch") {
-		t.Error("View() should contain hint 'Enter:launch'")
+	// Hint bar should be present with new single-key bindings.
+	if !strings.Contains(view, "↵:launch") {
+		t.Error("View() should contain hint '↵:launch'")
 	}
-	if !strings.Contains(view, "^Y:copy") {
-		t.Error("View() should contain hint '^Y:copy'")
+	if !strings.Contains(view, "y:copy") {
+		t.Error("View() should contain hint 'y:copy'")
 	}
-	if !strings.Contains(view, "^R:refresh") {
-		t.Error("View() should contain hint '^R:refresh'")
+	if !strings.Contains(view, "r:refresh") {
+		t.Error("View() should contain hint 'r:refresh'")
 	}
 }
 
@@ -381,23 +384,23 @@ func TestAgentsTab_RefreshClearsState(t *testing.T) {
 	tab.cursor = 3
 	tab.preview = "some preview"
 
-	// Send Ctrl+R to trigger refresh.
-	tab, cmd := updateAgentsTab(t, tab, tea.KeyMsg{Type: tea.KeyCtrlR})
+	// Send "r" to trigger refresh (search must be unfocused).
+	tab, cmd := updateAgentsTab(t, tab, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 
 	if !tab.loading {
-		t.Error("loading should be true after Ctrl+R")
+		t.Error("loading should be true after 'r' refresh")
 	}
 	if len(tab.agents) != 0 {
-		t.Errorf("agents should be cleared after Ctrl+R, got %d", len(tab.agents))
+		t.Errorf("agents should be cleared after refresh, got %d", len(tab.agents))
 	}
 	if tab.cursor != 0 {
-		t.Errorf("cursor = %d after Ctrl+R, want 0", tab.cursor)
+		t.Errorf("cursor = %d after refresh, want 0", tab.cursor)
 	}
 	if tab.preview != "" {
-		t.Errorf("preview should be cleared after Ctrl+R, got %q", tab.preview)
+		t.Errorf("preview should be cleared after refresh, got %q", tab.preview)
 	}
 	if cmd == nil {
-		t.Error("Ctrl+R should return a non-nil cmd to reload agents")
+		t.Error("refresh should return a non-nil cmd to reload agents")
 	}
 }
 
@@ -412,6 +415,33 @@ func TestAgentsTab_SetSize(t *testing.T) {
 	}
 	if updated.height != 30 {
 		t.Errorf("height = %d, want 30", updated.height)
+	}
+}
+
+// ── SearchFocusMsg / SearchBlurMsg ────────────────────────────────────────────
+
+func TestAgentsTab_SearchFocusMsg_FocusesInput(t *testing.T) {
+	tab := NewAgentsTab()
+	tab = sendAgentsLoaded(t, tab, makeTestAgents())
+
+	if tab.searchInput.Focused() {
+		t.Error("searchInput should not be focused initially")
+	}
+
+	tab, _ = updateAgentsTab(t, tab, SearchFocusMsg{})
+	if !tab.searchInput.Focused() {
+		t.Error("searchInput should be focused after SearchFocusMsg")
+	}
+}
+
+func TestAgentsTab_SearchBlurMsg_BlursInput(t *testing.T) {
+	tab := NewAgentsTab()
+	tab = sendAgentsLoaded(t, tab, makeTestAgents())
+
+	tab, _ = updateAgentsTab(t, tab, SearchFocusMsg{})
+	tab, _ = updateAgentsTab(t, tab, SearchBlurMsg{})
+	if tab.searchInput.Focused() {
+		t.Error("searchInput should be blurred after SearchBlurMsg")
 	}
 }
 

@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -141,9 +140,8 @@ func (d DAGTab) loadDAGCmd() tea.Cmd {
 		return nil
 	}
 	sess := d.sessions[d.selectedIdx]
-	sessionDir := filepath.Dir(sess.FilePath)
 	return func() tea.Msg {
-		dag, err := data.ParseDAG(sessionDir)
+		dag, err := data.ParseDAG(sess.FilePath)
 		return DAGLoadedMsg{DAG: dag, Err: err}
 	}
 }
