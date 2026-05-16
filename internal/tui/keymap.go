@@ -6,9 +6,8 @@ import "github.com/charmbracelet/bubbles/key"
 type KeyMap struct {
 	// Tab switching (work only when search is unfocused)
 	Tab1    key.Binding // "1" → Sessions
-	Tab2    key.Binding // "2" → Agents
-	Tab3    key.Binding // "3" → DAG
-	Tab4    key.Binding // "4" → Skills
+	Tab2    key.Binding // "2" → Skills
+	Tab3    key.Binding // "3" → Cost
 	NextTab key.Binding // "tab" → cycle forward
 	PrevTab key.Binding // "shift+tab" → cycle backward
 
@@ -40,15 +39,11 @@ func DefaultKeyMap() KeyMap {
 		),
 		Tab2: key.NewBinding(
 			key.WithKeys("2"),
-			key.WithHelp("2", "agents"),
+			key.WithHelp("2", "skills"),
 		),
 		Tab3: key.NewBinding(
 			key.WithKeys("3"),
-			key.WithHelp("3", "dag"),
-		),
-		Tab4: key.NewBinding(
-			key.WithKeys("4"),
-			key.WithHelp("4", "skills"),
+			key.WithHelp("3", "cost"),
 		),
 		NextTab: key.NewBinding(
 			key.WithKeys("tab"),
