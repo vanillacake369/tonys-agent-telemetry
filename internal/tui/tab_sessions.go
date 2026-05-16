@@ -26,6 +26,12 @@ type PreviewLoadedMsg struct {
 	Err   error
 }
 
+// FileChangesLoadedMsg is sent when ParseFileChanges completes.
+type FileChangesLoadedMsg struct {
+	Changes []data.FileChange
+	Err     error
+}
+
 // SessionsTab implements TabModel for the Sessions tab.
 type SessionsTab struct {
 	sessions    []data.Session
@@ -33,6 +39,7 @@ type SessionsTab struct {
 	cursor      int
 	searchInput textinput.Model
 	preview     []data.Turn
+	fileChanges []data.FileChange
 	width       int
 	height      int
 	loading     bool
@@ -73,6 +80,7 @@ func (s SessionsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		s.sessions = msg.Sessions
 		s.filtered = msg.Sessions
 		s.cursor = 0
+		s.fileChanges = nil
 		return s, s.loadPreviewCmd()
 
 	case PreviewLoadedMsg:
@@ -80,6 +88,14 @@ func (s SessionsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 			s.preview = msg.Turns
 		} else {
 			s.preview = nil
+		}
+		return s, s.loadFileChangesCmd()
+
+	case FileChangesLoadedMsg:
+		if msg.Err == nil {
+			s.fileChanges = msg.Changes
+		} else {
+			s.fileChanges = nil
 		}
 		return s, nil
 
@@ -106,6 +122,7 @@ func (s SessionsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 			if s.cursor >= len(s.filtered) {
 				s.cursor = max(0, len(s.filtered)-1)
 			}
+			s.fileChanges = nil
 			cmds = append(cmds, s.loadPreviewCmd())
 			return s, tea.Batch(cmds...)
 		}
@@ -146,6 +163,7 @@ func (s SessionsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		case key.Matches(msg, s.keys.Up):
 			if s.cursor > 0 {
 				s.cursor--
+				s.fileChanges = nil
 				return s, s.loadPreviewCmd()
 			}
 			return s, nil
@@ -153,6 +171,7 @@ func (s SessionsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		case key.Matches(msg, s.keys.Down):
 			if s.cursor < len(s.filtered)-1 {
 				s.cursor++
+				s.fileChanges = nil
 				return s, s.loadPreviewCmd()
 			}
 			return s, nil
@@ -205,6 +224,19 @@ func (s SessionsTab) loadPreviewCmd() tea.Cmd {
 	return func() tea.Msg {
 		turns, err := data.ParseConversationPreview(filePath, 5)
 		return PreviewLoadedMsg{Turns: turns, Err: err}
+	}
+}
+
+// loadFileChangesCmd returns a tea.Cmd that loads file changes for the
+// currently selected session. Returns nil when there is no selected session.
+func (s SessionsTab) loadFileChangesCmd() tea.Cmd {
+	if len(s.filtered) == 0 || s.cursor >= len(s.filtered) {
+		return nil
+	}
+	filePath := s.filtered[s.cursor].FilePath
+	return func() tea.Msg {
+		changes, err := data.ParseFileChanges(filePath)
+		return FileChangesLoadedMsg{Changes: changes, Err: err}
 	}
 }
 
@@ -291,7 +323,7 @@ func (s SessionsTab) renderSessionList(width, height int) string {
 
 // formatSessionLine formats a single session entry with responsive column widths.
 // Uses lipgloss.MaxWidth for CJK-aware truncation (double-width chars = 2 cells).
-// Narrow (<35): prompt only. Medium (<50): date + prompt. Wide: date + project + prompt.
+// Narrow (<35): prompt only. Medium (<50): date + prompt. Wide: date + project + stats + prompt.
 func (s SessionsTab) formatSessionLine(sess data.Session, maxWidth int) string {
 	timestamp := sess.Timestamp.Format("01-02 15:04")
 	project := filepath.Base(sess.CWD)
@@ -314,7 +346,7 @@ func (s SessionsTab) formatSessionLine(sess data.Session, maxWidth int) string {
 		return dateStr + trunc(prompt, remaining)
 	}
 
-	// Wide: date(12) + project(12) + prompt(remaining)
+	// Wide: date(12) + project(12) + stats(8) + prompt(remaining)
 	dateCol := timestamp + " "
 	projCol := trunc(project, 12)
 	// Pad project to fixed width
@@ -322,13 +354,28 @@ func (s SessionsTab) formatSessionLine(sess data.Session, maxWidth int) string {
 	if projPad > 0 {
 		projCol += strings.Repeat(" ", projPad)
 	}
-	prefix := dateCol + projCol + " "
+	// Stats column: turn count and duration (e.g. "3t 4m ")
+	statsCol := ""
+	if sess.TurnCount > 0 || sess.Duration > 0 {
+		minutes := int(sess.Duration.Minutes())
+		statsCol = fmt.Sprintf("%dt %dm ", sess.TurnCount, minutes)
+		// Pad stats to fixed width of 8
+		statsPad := 8 - lipgloss.Width(statsCol)
+		if statsPad > 0 {
+			statsCol += strings.Repeat(" ", statsPad)
+		} else if statsPad < 0 {
+			statsCol = trunc(statsCol, 8)
+		}
+	} else {
+		statsCol = strings.Repeat(" ", 8)
+	}
+	prefix := dateCol + projCol + " " + statsCol
 	prefixWidth := lipgloss.Width(prefix)
 	remaining := max(1, maxWidth-prefixWidth)
 	return prefix + trunc(prompt, remaining)
 }
 
-// renderPreview renders the right panel with the conversation preview.
+// renderPreview renders the right panel with the conversation preview and file changes.
 func (s SessionsTab) renderPreview(width, height int) string {
 	if len(s.filtered) == 0 {
 		return RenderEmptyState("No session selected", width, height)
@@ -360,6 +407,44 @@ func (s SessionsTab) renderPreview(width, height int) string {
 		)
 
 		lines = append(lines, fmt.Sprintf("%s %s", roleLabel, content))
+	}
+
+	// Render file changes section below conversation preview.
+	if len(s.fileChanges) > 0 {
+		dimStyle := lipgloss.NewStyle().Foreground(colorDim)
+		lines = append(lines, "")
+		lines = append(lines, dimStyle.Render("── Files Changed ──"))
+
+		const maxShown = 10
+		shown := s.fileChanges
+		extra := 0
+		if len(shown) > maxShown {
+			extra = len(shown) - maxShown
+			shown = shown[:maxShown]
+		}
+		for _, fc := range shown {
+			var icon string
+			switch fc.Action {
+			case "write":
+				icon = "✨"
+			case "edit":
+				icon = "✏️"
+			default:
+				icon = "📄"
+			}
+			suffix := ""
+			if fc.Action == "read" {
+				suffix = " (read)"
+			} else if fc.Action == "write" {
+				suffix = " (new)"
+			}
+			pathWidth := max(1, width-6)
+			entry := icon + " " + truncateToWidth(fc.Path, pathWidth) + suffix
+			lines = append(lines, entry)
+		}
+		if extra > 0 {
+			lines = append(lines, fmt.Sprintf("  + %d more", extra))
+		}
 	}
 
 	previewContent := strings.Join(lines, "\n")

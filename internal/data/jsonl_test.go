@@ -449,6 +449,185 @@ func TestParseSessionHeader_RealFile(t *testing.T) {
 	}
 }
 
+// toolUseLine returns an assistant JSONL line with a single tool_use block.
+func toolUseLine(sessionID, toolName, filePath string, ts time.Time) string {
+	inputBytes, _ := json.Marshal(map[string]interface{}{
+		"file_path": filePath,
+	})
+	msg := map[string]interface{}{
+		"type":      "assistant",
+		"timestamp": ts.Format(time.RFC3339Nano),
+		"sessionId": sessionID,
+		"message": map[string]interface{}{
+			"role":  "assistant",
+			"model": "claude-opus-4-6",
+			"content": []map[string]interface{}{
+				{
+					"type":  "tool_use",
+					"id":    "toolu_test456",
+					"name":  toolName,
+					"input": json.RawMessage(inputBytes),
+				},
+			},
+		},
+	}
+	b, _ := json.Marshal(msg)
+	return string(b)
+}
+
+// --- ParseSessionHeader stats tests ---
+
+func TestParseSessionHeader_TurnCountAndDuration(t *testing.T) {
+	base := time.Date(2026, 5, 16, 7, 0, 0, 0, time.UTC)
+	lines := []string{
+		userLine("sess-1", "/tmp", "main", "1.0", "first", base),
+		assistantLine("sess-1", "claude-opus-4-6", base.Add(1*time.Minute)),
+		userLine("sess-1", "/tmp", "main", "1.0", "second", base.Add(2*time.Minute)),
+		assistantLine("sess-1", "claude-opus-4-6", base.Add(4*time.Minute)),
+	}
+	_, path := mockJSONLDir(t, lines)
+
+	s, err := ParseSessionHeader(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.TurnCount != 2 {
+		t.Errorf("TurnCount = %d, want 2", s.TurnCount)
+	}
+	wantDuration := 4 * time.Minute
+	if s.Duration != wantDuration {
+		t.Errorf("Duration = %v, want %v", s.Duration, wantDuration)
+	}
+}
+
+func TestParseSessionHeader_SingleMessage_ZeroDuration(t *testing.T) {
+	ts := time.Date(2026, 5, 16, 7, 0, 0, 0, time.UTC)
+	lines := []string{
+		userLine("sess-2", "/tmp", "main", "1.0", "only message", ts),
+	}
+	_, path := mockJSONLDir(t, lines)
+
+	s, err := ParseSessionHeader(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.TurnCount != 1 {
+		t.Errorf("TurnCount = %d, want 1", s.TurnCount)
+	}
+	if s.Duration != 0 {
+		t.Errorf("Duration = %v, want 0 (single timestamp)", s.Duration)
+	}
+}
+
+// --- ParseFileChanges tests ---
+
+func TestParseFileChanges_ExtractsEditWriteRead(t *testing.T) {
+	ts := time.Now()
+	lines := []string{
+		userLine("sess-fc", "/tmp", "main", "1.0", "do stuff", ts),
+		toolUseLine("sess-fc", "Edit", "/tmp/foo.go", ts.Add(time.Second)),
+		toolUseLine("sess-fc", "Write", "/tmp/bar.go", ts.Add(2*time.Second)),
+		toolUseLine("sess-fc", "Read", "/tmp/baz.go", ts.Add(3*time.Second)),
+	}
+	_, path := mockJSONLDir(t, lines)
+
+	changes, err := ParseFileChanges(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(changes) != 3 {
+		t.Fatalf("expected 3 file changes, got %d", len(changes))
+	}
+
+	byPath := map[string]string{}
+	for _, fc := range changes {
+		byPath[fc.Path] = fc.Action
+	}
+	if byPath["/tmp/foo.go"] != "edit" {
+		t.Errorf("foo.go action = %q, want edit", byPath["/tmp/foo.go"])
+	}
+	if byPath["/tmp/bar.go"] != "write" {
+		t.Errorf("bar.go action = %q, want write", byPath["/tmp/bar.go"])
+	}
+	if byPath["/tmp/baz.go"] != "read" {
+		t.Errorf("baz.go action = %q, want read", byPath["/tmp/baz.go"])
+	}
+}
+
+func TestParseFileChanges_Dedup_PreferWriteOverEdit(t *testing.T) {
+	ts := time.Now()
+	lines := []string{
+		userLine("sess-dup", "/tmp", "main", "1.0", "edit then write", ts),
+		toolUseLine("sess-dup", "Read", "/tmp/same.go", ts.Add(time.Second)),
+		toolUseLine("sess-dup", "Edit", "/tmp/same.go", ts.Add(2*time.Second)),
+		toolUseLine("sess-dup", "Write", "/tmp/same.go", ts.Add(3*time.Second)),
+	}
+	_, path := mockJSONLDir(t, lines)
+
+	changes, err := ParseFileChanges(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 deduplicated change, got %d", len(changes))
+	}
+	if changes[0].Action != "write" {
+		t.Errorf("action = %q, want write (highest precedence)", changes[0].Action)
+	}
+	if changes[0].Path != "/tmp/same.go" {
+		t.Errorf("path = %q, want /tmp/same.go", changes[0].Path)
+	}
+}
+
+func TestParseFileChanges_Dedup_EditOverRead(t *testing.T) {
+	ts := time.Now()
+	lines := []string{
+		userLine("sess-er", "/tmp", "main", "1.0", "read then edit", ts),
+		toolUseLine("sess-er", "Read", "/tmp/file.go", ts.Add(time.Second)),
+		toolUseLine("sess-er", "Edit", "/tmp/file.go", ts.Add(2*time.Second)),
+	}
+	_, path := mockJSONLDir(t, lines)
+
+	changes, err := ParseFileChanges(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 deduplicated change, got %d: %v", len(changes), changes)
+	}
+	if changes[0].Action != "edit" {
+		t.Errorf("action = %q, want edit", changes[0].Action)
+	}
+}
+
+func TestParseFileChanges_EmptyFile(t *testing.T) {
+	_, path := mockJSONLDir(t, []string{})
+	changes, err := ParseFileChanges(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(changes) != 0 {
+		t.Errorf("expected 0 changes for empty file, got %d", len(changes))
+	}
+}
+
+func TestParseFileChanges_NoToolUse(t *testing.T) {
+	ts := time.Now()
+	lines := []string{
+		userLine("sess-no", "/tmp", "main", "1.0", "just chat", ts),
+		assistantLine("sess-no", "claude-opus-4-6", ts.Add(time.Second)),
+	}
+	_, path := mockJSONLDir(t, lines)
+
+	changes, err := ParseFileChanges(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(changes) != 0 {
+		t.Errorf("expected 0 changes, got %d", len(changes))
+	}
+}
+
 // projectRoot walks up from the test file's directory to find the module root.
 func projectRoot(t *testing.T) string {
 	t.Helper()

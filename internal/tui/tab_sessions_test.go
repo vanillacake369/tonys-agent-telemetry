@@ -350,6 +350,61 @@ func TestSessionsTab_SearchFocused_NumberKeysGoToInput(t *testing.T) {
 	}
 }
 
+func TestFormatSessionLine_WideMode_ShowsStats(t *testing.T) {
+	s := NewSessionsTab()
+	sess := data.Session{
+		ID:          "session-stat1",
+		CWD:         "/Users/test/dev/myproject",
+		ProjectDir:  "/Users/test/dev/myproject",
+		FirstPrompt: "implement the feature",
+		Timestamp:   time.Date(2026, 5, 16, 10, 30, 0, 0, time.UTC),
+		TurnCount:   3,
+		Duration:    4 * time.Minute,
+	}
+	line := s.formatSessionLine(sess, 80)
+	if !strings.Contains(line, "3t") {
+		t.Errorf("expected turn count '3t' in line, got: %q", line)
+	}
+	if !strings.Contains(line, "4m") {
+		t.Errorf("expected duration '4m' in line, got: %q", line)
+	}
+}
+
+func TestFormatSessionLine_WideMode_ZeroStats_ShowsSpaces(t *testing.T) {
+	s := NewSessionsTab()
+	sess := data.Session{
+		ID:          "session-stat2",
+		CWD:         "/Users/test/dev/myproject",
+		ProjectDir:  "/Users/test/dev/myproject",
+		FirstPrompt: "some prompt",
+		Timestamp:   time.Date(2026, 5, 16, 10, 30, 0, 0, time.UTC),
+		TurnCount:   0,
+		Duration:    0,
+	}
+	line := s.formatSessionLine(sess, 80)
+	// Zero stats should not inject "0t 0m" (shows padding spaces instead)
+	if strings.Contains(line, "0t") {
+		t.Errorf("zero turn count should not show '0t', got: %q", line)
+	}
+}
+
+func TestFormatSessionLine_NarrowMode_NoStats(t *testing.T) {
+	s := NewSessionsTab()
+	sess := data.Session{
+		ID:          "session-stat3",
+		CWD:         "/tmp",
+		FirstPrompt: "short",
+		Timestamp:   time.Date(2026, 5, 16, 10, 30, 0, 0, time.UTC),
+		TurnCount:   5,
+		Duration:    10 * time.Minute,
+	}
+	// Narrow mode (<35) shows prompt only — no stats column.
+	line := s.formatSessionLine(sess, 30)
+	if strings.Contains(line, "5t") {
+		t.Errorf("narrow mode should not show stats, got: %q", line)
+	}
+}
+
 func TestSessionsTab_Unfocused_RKeyRefreshes(t *testing.T) {
 	s := NewSessionsTab()
 	sessions := makeSessions()

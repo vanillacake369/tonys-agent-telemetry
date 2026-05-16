@@ -121,8 +121,9 @@ func extractTextFromContent(raw json.RawMessage, skipThinking bool) string {
 	return strings.Join(parts, "\n")
 }
 
-// ParseSessionHeader reads the first few lines of a JSONL file to extract
-// session metadata. Corrupted lines are skipped. Missing fields are zero values.
+// ParseSessionHeader reads the entire JSONL file to extract session metadata
+// and compute session statistics (turn count, duration).
+// Corrupted lines are skipped. Missing fields are zero values.
 // Returns an error only if the file cannot be opened or contains no usable data.
 func ParseSessionHeader(filepath string) (*Session, error) {
 	f, err := os.Open(filepath)
@@ -133,6 +134,7 @@ func ParseSessionHeader(filepath string) (*Session, error) {
 
 	session := &Session{FilePath: filepath}
 	foundAny := false
+	var lastTimestamp time.Time
 	scanner := bufio.NewScanner(f)
 	// Increase buffer size for long lines.
 	buf := make([]byte, 1<<20)
@@ -161,8 +163,11 @@ func ParseSessionHeader(filepath string) (*Session, error) {
 		if msg.Version != "" && session.Version == "" {
 			session.Version = msg.Version
 		}
-		if ts := parseTimestamp(msg.Timestamp); !ts.IsZero() && session.Timestamp.IsZero() {
-			session.Timestamp = ts
+		if ts := parseTimestamp(msg.Timestamp); !ts.IsZero() {
+			if session.Timestamp.IsZero() {
+				session.Timestamp = ts
+			}
+			lastTimestamp = ts
 		}
 
 		// Extract model from assistant messages.
@@ -172,23 +177,22 @@ func ParseSessionHeader(filepath string) (*Session, error) {
 			}
 		}
 
-		// Extract first user prompt. Newlines are replaced with spaces
-		// to prevent multi-line list items from breaking TUI layout.
-		if msg.Type == "user" && msg.Message != nil && session.FirstPrompt == "" {
-			text := extractTextFromContent(msg.Message.Content, false)
-			text = strings.ReplaceAll(text, "\n", " ")
-			text = strings.ReplaceAll(text, "\r", "")
-			if text != "" {
-				session.FirstPrompt = truncate(text, maxFirstPromptLen)
+		// Count user turns and extract first user prompt.
+		if msg.Type == "user" && msg.Message != nil {
+			session.TurnCount++
+			// Extract first user prompt. Newlines are replaced with spaces
+			// to prevent multi-line list items from breaking TUI layout.
+			if session.FirstPrompt == "" {
+				text := extractTextFromContent(msg.Message.Content, false)
+				text = strings.ReplaceAll(text, "\n", " ")
+				text = strings.ReplaceAll(text, "\r", "")
+				if text != "" {
+					session.FirstPrompt = truncate(text, maxFirstPromptLen)
+				}
 			}
 		}
 
 		foundAny = true
-
-		// Stop early once we have all fields.
-		if session.ID != "" && session.CWD != "" && session.Model != "" && session.FirstPrompt != "" {
-			break
-		}
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -200,6 +204,11 @@ func ParseSessionHeader(filepath string) (*Session, error) {
 
 	if !foundAny {
 		return nil, fmt.Errorf("no usable data in %s", filepath)
+	}
+
+	// Compute duration from first to last observed timestamp.
+	if !session.Timestamp.IsZero() && lastTimestamp.After(session.Timestamp) {
+		session.Duration = lastTimestamp.Sub(session.Timestamp)
 	}
 
 	return session, nil
@@ -248,6 +257,102 @@ func ParseConversationPreview(filepath string, maxTurns int) ([]Turn, error) {
 	// Ignore scanner.Err() for truncated-line tolerance.
 
 	return turns, nil
+}
+
+// FileChange represents a file that was accessed or modified during a session.
+type FileChange struct {
+	Path   string
+	Action string // "write", "edit", or "read"
+}
+
+// actionRank maps action names to precedence for deduplication.
+// Higher rank wins when the same file appears multiple times.
+var actionRank = map[string]int{
+	"write": 3,
+	"edit":  2,
+	"read":  1,
+}
+
+// ParseFileChanges extracts unique file paths from tool_use events in the JSONL.
+// For each tool_use with name "Edit", "Write", or "Read", input.file_path is extracted.
+// When the same path appears multiple times, write > edit > read takes precedence.
+// Results are returned in first-occurrence order.
+func ParseFileChanges(filepath string) ([]FileChange, error) {
+	f, err := os.Open(filepath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	// Track order of first occurrence and best action per path.
+	type entry struct {
+		action string
+		order  int
+	}
+	seen := map[string]entry{}
+	var order int
+
+	scanner := bufio.NewScanner(f)
+	buf := make([]byte, 1<<20)
+	scanner.Buffer(buf, 1<<20)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var msg rawMessage
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			continue
+		}
+		if msg.Type != "assistant" || msg.Message == nil {
+			continue
+		}
+		var blocks []rawContentBlock
+		if err := json.Unmarshal(msg.Message.Content, &blocks); err != nil {
+			continue
+		}
+		for _, block := range blocks {
+			if block.Type != "tool_use" {
+				continue
+			}
+			var action string
+			switch block.Name {
+			case "Write":
+				action = "write"
+			case "Edit", "MultiEdit":
+				action = "edit"
+			case "Read":
+				action = "read"
+			default:
+				continue
+			}
+			// Extract file_path from the tool input.
+			var input struct {
+				FilePath string `json:"file_path"`
+			}
+			if err := json.Unmarshal(block.Input, &input); err != nil || input.FilePath == "" {
+				continue
+			}
+			if prev, exists := seen[input.FilePath]; exists {
+				// Keep higher-rank action.
+				if actionRank[action] > actionRank[prev.action] {
+					seen[input.FilePath] = entry{action: action, order: prev.order}
+				}
+			} else {
+				seen[input.FilePath] = entry{action: action, order: order}
+				order++
+			}
+		}
+	}
+	// Ignore scanner.Err() for truncated-line tolerance.
+
+	// Build result slice in first-occurrence order.
+	result := make([]FileChange, len(seen))
+	for path, e := range seen {
+		result[e.order] = FileChange{Path: path, Action: e.action}
+	}
+	return result, nil
 }
 
 // agentTaskStatus maps a task ID to its completion status from queue-operation events.

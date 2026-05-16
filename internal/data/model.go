@@ -5,14 +5,16 @@ import "time"
 // Session represents metadata extracted from a Claude Code session JSONL file.
 type Session struct {
 	ID          string
-	ProjectDir  string    // derived from path
+	ProjectDir  string        // derived from path
 	CWD         string
 	GitBranch   string
-	FirstPrompt string    // first user message (truncated to 100 chars)
+	FirstPrompt string        // first user message (truncated to 100 chars)
 	Timestamp   time.Time
-	Model       string    // e.g. "claude-opus-4-6"
+	Model       string        // e.g. "claude-opus-4-6"
 	Version     string
-	FilePath    string    // absolute path to .jsonl
+	FilePath    string        // absolute path to .jsonl
+	TurnCount   int           // number of user messages
+	Duration    time.Duration // last timestamp - first timestamp
 }
 
 // Agent represents a configured Claude Code agent.
