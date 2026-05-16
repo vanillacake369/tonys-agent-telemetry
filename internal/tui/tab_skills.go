@@ -73,6 +73,7 @@ type SkillsTab struct {
 	lastPreviewURL  string // dedup: skip if same URL already fetched/fetching
 	previewCancelFn context.CancelFunc
 	keys            KeyMap
+	wizard          AnalyzeWizard
 }
 
 // NewSkillsTab creates an initialised SkillsTab.
@@ -87,6 +88,7 @@ func NewSkillsTab() SkillsTab {
 		searchInput: ti,
 		loading:     true,
 		keys:        DefaultKeyMap(),
+		wizard:      NewAnalyzeWizard(),
 	}
 }
 
@@ -103,6 +105,11 @@ func (t SkillsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case AnalyzeExecuteMsg:
+		_ = executeAnalysis(msg.Model, msg.Prompt)
+		t.wizard.visible = false
+		return t, nil
+
 	case LocalSkillsLoadedMsg:
 		t.loading = false
 		t.err = msg.Err
@@ -171,6 +178,16 @@ func (t SkillsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		return t, nil
 
 	case tea.KeyMsg:
+		// When the wizard overlay is visible, delegate all keys to it.
+		if t.wizard.visible {
+			var wizardCmd tea.Cmd
+			t.wizard, wizardCmd = t.wizard.Update(msg)
+			if wizardCmd != nil {
+				cmds = append(cmds, wizardCmd)
+			}
+			return t, tea.Batch(cmds...)
+		}
+
 		// Block Enter/newline in search mode — prevent layout breakage.
 		if t.searchInput.Focused() && (msg.Type == tea.KeyEnter) {
 			return t, nil
@@ -227,9 +244,7 @@ func (t SkillsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		case key.Matches(msg, t.keys.Enter):
 			if len(t.filtered) > 0 && t.cursor < len(t.filtered) {
 				s := t.filtered[t.cursor]
-				readmeContent := t.preview
-				claudeCmd := buildClaudeAnalysisCmd(s, readmeContent)
-				_ = platform.Detect().OpenPane(claudeCmd)
+				t.wizard.Show(s, t.preview)
 			}
 			return t, nil
 
@@ -482,6 +497,8 @@ func (t SkillsTab) SetSize(width, height int) TabModel {
 	t.height = height
 	leftW, _, _ := SplitLayout(width, 45)
 	t.searchInput.Width = max(1, leftW-20)
+	t.wizard.width = width
+	t.wizard.height = height
 	return t
 }
 
@@ -510,6 +527,17 @@ func (t SkillsTab) View() string {
 	} else {
 		leftContent := t.renderSkillListWithSearch(max(1, leftW-2), max(1, listHeight-2))
 		splitView = RenderPanel("Skills", leftContent, leftW, listHeight, true)
+	}
+
+	// Render the wizard overlay centered on top when it is visible.
+	if t.wizard.visible {
+		overlay := t.wizard.View()
+		return lipgloss.Place(
+			t.width, t.height,
+			lipgloss.Center, lipgloss.Center,
+			overlay,
+			lipgloss.WithWhitespaceForeground(colorDim),
+		)
 	}
 
 	return splitView
