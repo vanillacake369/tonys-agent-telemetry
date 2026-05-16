@@ -76,7 +76,7 @@ func parseAgentFile(path string) (*Agent, error) {
 		case "name":
 			agent.Name = value
 		case "description":
-			agent.Description = value
+			agent.Description = strings.ReplaceAll(value, "\n", " ")
 		case "model":
 			agent.Model = value
 		}

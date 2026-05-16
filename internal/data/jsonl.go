@@ -172,9 +172,12 @@ func ParseSessionHeader(filepath string) (*Session, error) {
 			}
 		}
 
-		// Extract first user prompt.
+		// Extract first user prompt. Newlines are replaced with spaces
+		// to prevent multi-line list items from breaking TUI layout.
 		if msg.Type == "user" && msg.Message != nil && session.FirstPrompt == "" {
 			text := extractTextFromContent(msg.Message.Content, false)
+			text = strings.ReplaceAll(text, "\n", " ")
+			text = strings.ReplaceAll(text, "\r", "")
 			if text != "" {
 				session.FirstPrompt = truncate(text, maxFirstPromptLen)
 			}
