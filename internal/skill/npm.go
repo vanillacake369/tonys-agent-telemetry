@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"net/url"
 	"time"
 )
@@ -77,7 +78,7 @@ func searchNPMWithURL(ctx context.Context, query string, limit int, baseURL stri
 	skills := make([]Skill, 0, len(result.Objects))
 	for _, obj := range result.Objects {
 		pkg := obj.Package
-		repoURL := pkg.Links.Repository
+		repoURL := cleanNpmURL(pkg.Links.Repository)
 		if repoURL == "" {
 			repoURL = pkg.Links.Npm
 		}
@@ -93,4 +94,12 @@ func searchNPMWithURL(ctx context.Context, query string, limit int, baseURL stri
 	}
 
 	return skills, nil
+}
+
+// cleanNpmURL normalizes npm repository URLs.
+// "git+https://github.com/owner/repo.git" → "https://github.com/owner/repo"
+func cleanNpmURL(u string) string {
+	u = strings.TrimPrefix(u, "git+")
+	u = strings.TrimSuffix(u, ".git")
+	return u
 }
