@@ -1,0 +1,35 @@
+version: 2
+
+builds:
+  - id: main
+    main: .
+    binary: tonys-agent-telemetry
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+
+  - id: hook-handler
+    main: ./cmd/hook-handler
+    binary: tonys-agent-telemetry-hook
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+
+archives:
+  - id: default
+    builds: [main, hook-handler]
+    format: tar.gz
+    name_template: "tonys-agent-telemetry_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"

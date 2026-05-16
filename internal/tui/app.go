@@ -1,11 +1,14 @@
 package tui
 
 import (
+	"context"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/event"
 )
 
 // Tab represents the active tab in the TUI.
@@ -41,11 +44,13 @@ type TabModel interface {
 
 // App is the root Bubble Tea model managing tab switching.
 type App struct {
-	activeTab Tab
-	tabs      map[Tab]TabModel
-	keys      KeyMap
-	width     int
-	height    int
+	activeTab  Tab
+	tabs       map[Tab]TabModel
+	keys       KeyMap
+	width      int
+	height     int
+	fifoEvents <-chan event.Event // nil when FIFO is not active
+	fifoCancel context.CancelFunc
 }
 
 const (
@@ -76,6 +81,15 @@ func (a App) Init() tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	}
+
+	// Start listening for real-time events if the TUI FIFO exists.
+	if info, err := os.Stat(event.DefaultFIFOPath); err == nil && info.Mode()&os.ModeNamedPipe != 0 {
+		ctx, cancel := context.WithCancel(context.Background())
+		a.fifoCancel = cancel
+		a.fifoEvents = event.ReadFIFO(ctx)
+		cmds = append(cmds, event.ListenForEvents(ctx, a.fifoEvents))
+	}
+
 	return tea.Batch(cmds...)
 }
 
@@ -85,6 +99,21 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 		a = a.propagateSize()
+		return a, nil
+
+	case event.EventMsg:
+		// Forward real-time events to the active tab and keep listening.
+		updated, cmd := a.tabs[a.activeTab].Update(msg)
+		a.tabs[a.activeTab] = updated
+		var listenCmd tea.Cmd
+		if a.fifoEvents != nil {
+			listenCmd = event.ListenForEvents(context.Background(), a.fifoEvents)
+		}
+		return a, tea.Batch(cmd, listenCmd)
+
+	case event.FIFOClosedMsg:
+		// FIFO channel closed — stop subscribing.
+		a.fifoEvents = nil
 		return a, nil
 
 	case tea.KeyMsg:

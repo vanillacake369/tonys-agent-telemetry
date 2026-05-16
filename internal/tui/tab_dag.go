@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/data"
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/event"
 )
 
 // DAGSessionsLoadedMsg is sent when session discovery completes for the DAG tab.
@@ -74,6 +75,9 @@ func (d DAGTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		d.refreshViewport()
 		return d, nil
 
+	case event.EventMsg:
+		return d.handleEventMsg(msg)
+
 	case tea.KeyMsg:
 		switch {
 		case msg.Type == tea.KeyLeft || msg.String() == "h":
@@ -107,6 +111,28 @@ func (d DAGTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		cmds = append(cmds, vpCmd)
 	}
 	return d, tea.Batch(cmds...)
+}
+
+// handleEventMsg reacts to real-time FIFO events from the hook handler.
+func (d DAGTab) handleEventMsg(msg event.EventMsg) (TabModel, tea.Cmd) {
+	switch msg.Event.HookType {
+	case "SubagentStop":
+		// Reload the DAG for the currently selected session to reflect the new state.
+		return d, d.loadDAGCmd()
+
+	case "SessionStart":
+		// A new session appeared — reload the session list.
+		return d, func() tea.Msg {
+			sessions, err := data.DiscoverSessions()
+			return DAGSessionsLoadedMsg{Sessions: sessions, Err: err}
+		}
+
+	case "Stop":
+		// The current session completed — reload DAG to show final state.
+		return d, d.loadDAGCmd()
+	}
+
+	return d, nil
 }
 
 // loadDAGCmd returns a Cmd that parses the DAG for the currently selected session.

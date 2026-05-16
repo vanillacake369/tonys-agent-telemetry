@@ -5,6 +5,7 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/event"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/tui"
 )
 
@@ -20,6 +21,12 @@ func main() {
 			printUsage()
 			return
 		}
+	}
+
+	// Create the FIFO for real-time hook events.
+	// Ignore errors — TUI works fine without real-time updates.
+	if err := event.CreateFIFO(); err == nil {
+		defer event.RemoveFIFO()
 	}
 
 	p := tea.NewProgram(tui.NewApp(), tea.WithAltScreen())
