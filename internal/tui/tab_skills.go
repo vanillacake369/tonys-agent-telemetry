@@ -76,7 +76,7 @@ type SkillsTab struct {
 // NewSkillsTab creates an initialised SkillsTab.
 func NewSkillsTab() SkillsTab {
 	ti := textinput.New()
-	ti.Placeholder = "Search skills... (press / to focus)"
+	ti.Placeholder = "/ to search"
 	ti.CharLimit = 200
 	ti.Width = 40
 
@@ -460,7 +460,8 @@ func sortByIcon(s skill.SortBy) string {
 func (t SkillsTab) SetSize(width, height int) TabModel {
 	t.width = width
 	t.height = height
-	t.searchInput.Width = max(1, width-20)
+	leftW, _, _ := SplitLayout(width, 45)
+	t.searchInput.Width = max(1, leftW-20)
 	return t
 }
 

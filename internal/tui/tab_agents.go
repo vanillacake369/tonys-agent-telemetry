@@ -67,7 +67,7 @@ type AgentsTab struct {
 // NewAgentsTab creates a new AgentsTab ready to be displayed.
 func NewAgentsTab() AgentsTab {
 	ti := textinput.New()
-	ti.Placeholder = "search agents... (press / to focus)"
+	ti.Placeholder = "/ to search"
 	ti.CharLimit = 64
 	ti.Width = 40
 
@@ -280,7 +280,8 @@ func (t AgentsTab) View() string {
 	// The full height is used for the list+preview panels.
 	listHeight := max(3, t.height)
 
-	t.searchInput.Width = max(1, t.width-6)
+	leftW := t.width / 2
+	t.searchInput.Width = max(1, leftW-7)
 	leftW, rightW, showPreview := SplitLayout(t.width, 50)
 
 	var splitView string

@@ -43,9 +43,9 @@ type SessionsTab struct {
 // NewSessionsTab creates an initialised SessionsTab.
 func NewSessionsTab() SessionsTab {
 	ti := textinput.New()
-	ti.Placeholder = "Search sessions... (press / to focus)"
+	ti.Placeholder = "/ to search"
 	ti.CharLimit = 200
-	ti.Width = 40
+	ti.Width = 30
 
 	return SessionsTab{
 		searchInput: ti,
@@ -212,7 +212,10 @@ func (s SessionsTab) loadPreviewCmd() tea.Cmd {
 func (s SessionsTab) SetSize(width, height int) TabModel {
 	s.width = width
 	s.height = height
-	s.searchInput.Width = max(1, width-4)
+	// Panel border (2) + left padding (1) + cursor prefix (2) = 5
+	// Use split layout width for left panel, not full tab width
+	leftW, _, _ := SplitLayout(width, 40)
+	s.searchInput.Width = max(1, leftW-7)
 	return s
 }
 
