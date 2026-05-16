@@ -1,6 +1,6 @@
 # Binaries
 tonys-agent-telemetry
-hook-handler
+bin/
 dist/
 *.exe
 
@@ -18,3 +18,4 @@ Thumbs.db
 
 # Build
 /tmp/
+result
