@@ -10,9 +10,9 @@ import (
 // ── SplitLayout ──────────────────────────────────────────────────────────────
 
 func TestSplitLayout_NormalWidth(t *testing.T) {
-	left, right, show := SplitLayout(80, 40)
+	left, right, show := SplitLayout(120, 40)
 	if !show {
-		t.Error("showPreview should be true for width=80")
+		t.Error("showPreview should be true for width=120")
 	}
 	if left <= 0 {
 		t.Errorf("left = %d, want > 0", left)
@@ -20,9 +20,18 @@ func TestSplitLayout_NormalWidth(t *testing.T) {
 	if right <= 0 {
 		t.Errorf("right = %d, want > 0", right)
 	}
-	// left + right + 1 (separator) should equal total width
-	if left+right+1 != 80 {
-		t.Errorf("left(%d) + right(%d) + 1 != 80", left, right)
+	if left+right+1 != 120 {
+		t.Errorf("left(%d) + right(%d) + 1 != 120", left, right)
+	}
+}
+
+func TestSplitLayout_Width80_NoPreview(t *testing.T) {
+	left, _, show := SplitLayout(80, 40)
+	if show {
+		t.Error("showPreview should be false for width=80 (below MinSplitWidth=90)")
+	}
+	if left != 80 {
+		t.Errorf("left = %d, want 80 (full width)", left)
 	}
 }
 

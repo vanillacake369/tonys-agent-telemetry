@@ -281,31 +281,43 @@ func (s SessionsTab) renderSessionList(width, height int) string {
 	return strings.Join(rows, "\n")
 }
 
-// formatSessionLine formats a single session entry using fixed-width columns for alignment.
-// Format: [date 11ch] [project 13ch] [prompt remaining]
-// Uses lipgloss MaxWidth for cell-width-aware truncation (handles CJK double-width chars).
+// formatSessionLine formats a single session entry with responsive column widths.
+// Uses lipgloss.MaxWidth for CJK-aware truncation (double-width chars = 2 cells).
+// Narrow (<35): prompt only. Medium (<50): date + prompt. Wide: date + project + prompt.
 func (s SessionsTab) formatSessionLine(sess data.Session, maxWidth int) string {
 	timestamp := sess.Timestamp.Format("01-02 15:04")
 	project := filepath.Base(sess.CWD)
 	if project == "" || project == "." {
 		project = filepath.Base(sess.ProjectDir)
 	}
+	prompt := strings.ReplaceAll(sess.FirstPrompt, "\n", " ")
 
-	const dateWidth = 11
-	const projWidth = 13
-	const sepWidth = 4 // "  " between each pair of columns = 2 separators × 2 spaces
-
-	truncStyle := func(width int) lipgloss.Style {
-		return lipgloss.NewStyle().MaxWidth(width).Width(width)
+	trunc := func(s string, w int) string {
+		return lipgloss.NewStyle().MaxWidth(w).Render(s)
 	}
 
-	dateCol := truncStyle(dateWidth).Render(timestamp)
-	projCol := truncStyle(projWidth).Render(project)
+	if maxWidth < 35 {
+		return trunc(prompt, maxWidth)
+	}
 
-	promptWidth := max(1, maxWidth-dateWidth-projWidth-sepWidth)
-	promptCol := lipgloss.NewStyle().MaxWidth(promptWidth).Render(sess.FirstPrompt)
+	if maxWidth < 50 {
+		dateStr := timestamp + " "
+		remaining := max(1, maxWidth-12)
+		return dateStr + trunc(prompt, remaining)
+	}
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, dateCol, "  ", projCol, "  ", promptCol)
+	// Wide: date(12) + project(12) + prompt(remaining)
+	dateCol := timestamp + " "
+	projCol := trunc(project, 12)
+	// Pad project to fixed width
+	projPad := 12 - lipgloss.Width(projCol)
+	if projPad > 0 {
+		projCol += strings.Repeat(" ", projPad)
+	}
+	prefix := dateCol + projCol + " "
+	prefixWidth := lipgloss.Width(prefix)
+	remaining := max(1, maxWidth-prefixWidth)
+	return prefix + trunc(prompt, remaining)
 }
 
 // renderPreview renders the right panel with the conversation preview.

@@ -8,12 +8,13 @@ import (
 )
 
 const (
-	// MinSplitWidth is the minimum terminal width for showing a split view.
+	// MinSplitWidth is the minimum tab-content width for showing a split view.
+	// Must account for two panel borders (4 chars each) + separator.
 	// Below this threshold the preview pane is hidden and the list takes full width.
-	MinSplitWidth = 60
+	MinSplitWidth = 90
 
 	// MinPreviewWidth is the absolute minimum width needed to show any preview.
-	MinPreviewWidth = 40
+	MinPreviewWidth = 50
 )
 
 // SplitLayout calculates left and right widths based on available terminal width.
@@ -170,17 +171,20 @@ func RenderHintBar(hints string, width int) string {
 // RenderListItem renders a single list entry with a cursor indicator.
 // selected items get a full-width background highlight with "▸" prefix;
 // others show 3-space indent matching the arrow width.
+// Uses MaxWidth to prevent line wrapping with CJK double-width characters.
 func RenderListItem(text string, selected bool, width int) string {
 	if selected {
 		return lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFFFF")).
 			Background(colorPrimary).
 			Bold(true).
+			MaxWidth(max(0, width)).
 			Width(max(0, width)).
 			Render(" ▸ " + text)
 	}
 	return lipgloss.NewStyle().
 		Foreground(colorText).
+		MaxWidth(max(0, width)).
 		Width(max(0, width)).
 		Render("   " + text)
 }

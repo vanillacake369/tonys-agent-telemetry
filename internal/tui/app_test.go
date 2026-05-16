@@ -222,8 +222,8 @@ func TestApp_ViewContainsStatusBar(t *testing.T) {
 	a := NewApp()
 	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 150, Height: 24})
 	view := a.View()
-	if !strings.Contains(view, "q:quit") {
-		t.Errorf("View() missing status bar hint 'q:quit'")
+	if !strings.Contains(view, "q quit") {
+		t.Errorf("View() missing status bar hint 'q quit'")
 	}
 }
 

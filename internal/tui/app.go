@@ -343,28 +343,32 @@ func (a App) renderStatusBar(width int) string {
 		mode := modeStyle.Render("SEARCH")
 		help = mode + " type to filter │ esc:back"
 	} else {
-		// Normal mode: dim label + tab switching hints and context-specific hints.
+		// Normal mode: responsive status bar — omit sections as width shrinks.
 		modeStyle := lipgloss.NewStyle().
 			Foreground(colorDim).
 			Padding(0, 1)
 		mode := modeStyle.Render("NORMAL")
 		tabSpecific := a.tabHints()
-		quitHint := "/:search ?:help q:quit"
-		tabs := "1:sessions 2:agents 3:dag 4:skills"
 
+		// Build from right to left, dropping sections if they don't fit.
+		// Priority: mode > tab hints > global hints > tab numbers
+		globalHint := "/ search  ? help  q quit"
+		tabNums := "1-4:tabs"
+
+		// Try full version first
 		var parts []string
-		parts = append(parts, mode+" │ "+tabs)
+		parts = append(parts, mode)
+		if innerWidth > 100 {
+			parts = append(parts, tabNums)
+		}
 		if tabSpecific != "" {
 			parts = append(parts, tabSpecific)
 		}
-		parts = append(parts, quitHint)
-
-		full := strings.Join(parts, " │ ")
-		// Truncate to available width as a safety net to prevent line wrapping.
-		if len([]rune(full)) > innerWidth {
-			full = string([]rune(full)[:innerWidth])
+		if innerWidth > 60 {
+			parts = append(parts, globalHint)
 		}
-		help = full
+
+		help = strings.Join(parts, " │ ")
 	}
 
 	return StatusBarStyle.Width(width).Render(
