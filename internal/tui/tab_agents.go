@@ -188,6 +188,11 @@ func (t AgentsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		return t, nil
 
 	case tea.KeyMsg:
+		// Block Enter in search mode.
+		if t.searchInput.Focused() && msg.Type == tea.KeyEnter {
+			return t, nil
+		}
+
 		// When search input is focused, forward keys to the text input.
 		if t.searchInput.Focused() {
 			prevQuery := t.searchInput.Value()

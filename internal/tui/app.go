@@ -207,10 +207,19 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, cmd
 	}
 
-	// Delegate remaining messages to the active tab.
-	updated, cmd := a.tabs[a.activeTab].Update(msg)
-	a.tabs[a.activeTab] = updated
-	return a, cmd
+	// Broadcast non-key messages to ALL tabs.
+	// Each tab's Init() fires at App startup, but the resulting messages
+	// (e.g. LocalSkillsLoadedMsg, SessionsLoadedMsg) arrive asynchronously.
+	// They must reach the tab that sent the Init(), not just the active tab.
+	var cmds []tea.Cmd
+	for tab, m := range a.tabs {
+		updated, cmd := m.Update(msg)
+		a.tabs[tab] = updated
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	return a, tea.Batch(cmds...)
 }
 
 func (a App) View() string {

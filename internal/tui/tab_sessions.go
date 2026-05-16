@@ -92,6 +92,11 @@ func (s SessionsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		return s, nil
 
 	case tea.KeyMsg:
+		// Block Enter in search mode — Esc to exit search, Enter is for actions.
+		if s.searchInput.Focused() && msg.Type == tea.KeyEnter {
+			return s, nil
+		}
+
 		// When search input is focused, forward keys to the text input.
 		if s.searchInput.Focused() {
 			var tiCmd tea.Cmd

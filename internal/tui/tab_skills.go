@@ -169,12 +169,22 @@ func (t SkillsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		return t, nil
 
 	case tea.KeyMsg:
+		// Block Enter/newline in search mode — prevent layout breakage.
+		if t.searchInput.Focused() && (msg.Type == tea.KeyEnter) {
+			return t, nil
+		}
+
 		// When search input is focused, forward keys to the text input.
 		if t.searchInput.Focused() {
 			prevQuery := t.searchInput.Value()
 			var inputCmd tea.Cmd
 			t.searchInput, inputCmd = t.searchInput.Update(msg)
 			cmds = append(cmds, inputCmd)
+
+			// Strip any newlines that may have been pasted.
+			if strings.Contains(t.searchInput.Value(), "\n") {
+				t.searchInput.SetValue(strings.ReplaceAll(t.searchInput.Value(), "\n", " "))
+			}
 
 			if t.searchInput.Value() != prevQuery {
 				t.lastKeystroke = time.Now()
