@@ -359,14 +359,15 @@ func TestSkillsTab_Refresh_ResetsState(t *testing.T) {
 }
 
 func TestSkillsTab_View_ContainsHints(t *testing.T) {
-	s := NewSkillsTab()
-	s, _ = updateSkillsTab(t, s, LocalSkillsLoadedMsg{Skills: makeTestSkillsList(), Err: nil})
-	s = s.SetSize(120, 30).(SkillsTab)
-
-	view := s.View()
+	// Hints are now shown in the app-level status bar, not the tab's own View().
+	// Use a wide terminal so all hints fit on the single status bar line.
+	a := NewApp()
+	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 160, Height: 30})
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}}) // switch to Skills tab
+	appView := a.View()
 	for _, hint := range []string{"↵:analyze", "o:open", "s:sort", "y:copy", "r:refresh"} {
-		if !strings.Contains(view, hint) {
-			t.Errorf("View() missing hint %q", hint)
+		if !strings.Contains(appView, hint) {
+			t.Errorf("App.View() missing skills hint %q in status bar", hint)
 		}
 	}
 }
@@ -497,13 +498,14 @@ func TestSkillsTab_Open_EmptyList_DoesNotPanic(t *testing.T) {
 }
 
 func TestSkillsTab_View_ContainsOpenHint(t *testing.T) {
-	s := NewSkillsTab()
-	s, _ = updateSkillsTab(t, s, LocalSkillsLoadedMsg{Skills: makeTestSkillsList(), Err: nil})
-	s = s.SetSize(120, 30).(SkillsTab)
-
-	view := s.View()
-	if !strings.Contains(view, "o:open") {
-		t.Errorf("View() missing hint 'o:open': %s", view)
+	// The "o:open" hint is now shown in the app-level status bar for the skills tab.
+	// Use a wide terminal so all hints fit on the single status bar line.
+	a := NewApp()
+	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 160, Height: 30})
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}}) // switch to Skills tab
+	appView := a.View()
+	if !strings.Contains(appView, "o:open") {
+		t.Errorf("App.View() missing hint 'o:open' in status bar")
 	}
 }
 

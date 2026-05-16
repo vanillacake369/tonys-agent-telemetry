@@ -310,9 +310,11 @@ func renderTabBar(active Tab, width int) string {
 		label := td.num + ":" + tabNames[td.tab]
 		var rendered string
 		if td.tab == active {
-			rendered = ActiveTabStyle.Render(label)
+			// Prepend a dot indicator to the active tab.
+			rendered = ActiveTabStyle.Render("● " + label)
 		} else {
-			rendered = InactiveTabStyle.Render(label)
+			// Pad with spaces to align with the dot indicator.
+			rendered = InactiveTabStyle.Render("  " + label)
 		}
 		if i < len(tabDefs)-1 {
 			rendered += TabSeparatorStyle.Render(tabSeparator)
@@ -323,8 +325,12 @@ func renderTabBar(active Tab, width int) string {
 	return TabBarStyle.Width(width).Render(bar)
 }
 
-// renderStatusBar returns a merged status bar showing mode indicator and key hints.
+// renderStatusBar returns a single-line status bar showing mode indicator and key hints.
+// Format (normal): NORMAL │ 1:sessions 2:agents 3:dag 4:skills │ <tab hints> │ /:search ?:help q:quit
+// Format (search): SEARCH │ type to filter │ esc:back
 func (a App) renderStatusBar(width int) string {
+	innerWidth := max(0, width-StatusBarStyle.GetHorizontalPadding())
+
 	var help string
 
 	if a.searchFocused {
@@ -342,21 +348,25 @@ func (a App) renderStatusBar(width int) string {
 			Foreground(colorDim).
 			Padding(0, 1)
 		mode := modeStyle.Render("NORMAL")
-		tabHints := "1:sessions 2:agents 3:dag 4:skills"
 		tabSpecific := a.tabHints()
-		quitHint := "/:search  ?:help  q:quit"
+		quitHint := "/:search ?:help q:quit"
+		tabs := "1:sessions 2:agents 3:dag 4:skills"
 
 		var parts []string
-		parts = append(parts, mode+" │ "+tabHints)
+		parts = append(parts, mode+" │ "+tabs)
 		if tabSpecific != "" {
 			parts = append(parts, tabSpecific)
 		}
 		parts = append(parts, quitHint)
 
-		help = strings.Join(parts, "  │  ")
+		full := strings.Join(parts, " │ ")
+		// Truncate to available width as a safety net to prevent line wrapping.
+		if len([]rune(full)) > innerWidth {
+			full = string([]rune(full)[:innerWidth])
+		}
+		help = full
 	}
 
-	innerWidth := max(0, width-StatusBarStyle.GetHorizontalPadding())
 	return StatusBarStyle.Width(width).Render(
 		lipgloss.PlaceHorizontal(innerWidth, lipgloss.Left, help),
 	)

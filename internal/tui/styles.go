@@ -7,7 +7,7 @@ var (
 	colorPrimary = lipgloss.AdaptiveColor{Light: "#5A4FCF", Dark: "#8B7CF6"}
 
 	// colorDim is used for inactive/secondary elements.
-	colorDim = lipgloss.AdaptiveColor{Light: "#999999", Dark: "#555555"}
+	colorDim = lipgloss.AdaptiveColor{Light: "#777777", Dark: "#666666"}
 
 	// colorBorder is used for separators and borders.
 	colorBorder = lipgloss.AdaptiveColor{Light: "#E0E0E0", Dark: "#333333"}
@@ -34,10 +34,9 @@ var (
 	statusBgColor = colorBg
 
 	// ActiveTabStyle renders the currently selected tab label.
-	// No border — just bold+underline text.
+	// Bold + primary color with a dot indicator prefix (applied in renderTabBar).
 	ActiveTabStyle = lipgloss.NewStyle().
 			Bold(true).
-			Underline(true).
 			Foreground(colorPrimary).
 			Padding(0, 1)
 

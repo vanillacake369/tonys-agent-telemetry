@@ -51,10 +51,12 @@ type ghRepoMeta struct {
 	HTMLURL         string    `json:"htmlUrl"`
 }
 
-// SearchGitHub uses a two-step approach to find Claude Code skill repos:
-//  1. Primary: `gh search code` for repos containing SKILL.md files.
-//  2. Fallback: if code search returns fewer than 5 results, supplement with
-//     a refined `gh search repos` query prefixed with "claude code skill".
+// SearchGitHub finds Claude Code skill repos using two strategies:
+//  1. Primary: `gh search repos "claude code skill {query}"` — high quality, stars-sorted.
+//  2. Supplement: `gh search repos --topic claude-skills` — topic-tagged repos.
+//
+// Code search (gh search code --filename SKILL.md) was removed because it returns
+// too many false positives (any repo with a SKILL.md file, not just Claude skills).
 //
 // Returns empty slice (not error) when gh is not installed or not authenticated.
 func SearchGitHub(ctx context.Context, query string, sort string, limit int) ([]Skill, error) {
@@ -65,79 +67,80 @@ func SearchGitHub(ctx context.Context, query string, sort string, limit int) ([]
 		sort = "stars"
 	}
 
-	// Check if gh is available.
 	if _, err := exec.LookPath("gh"); err != nil {
 		log.Printf("skill: gh CLI not found, skipping GitHub search")
 		return nil, nil
 	}
 
-	// Step 1: code search for repos that actually contain SKILL.md files.
-	codeResults := searchGitHubCode(ctx, query, limit)
+	// Primary: repo search with "claude code skill" prefix.
+	repoResults := searchGitHubRepos(ctx, query, sort, limit)
 
-	// Step 2: fallback with refined repo search when code search returns too few.
-	if len(codeResults) < 5 {
-		remaining := limit - len(codeResults)
-		repoResults := searchGitHubRepos(ctx, query, sort, remaining)
-		codeResults = append(codeResults, repoResults...)
-	}
+	// Supplement: topic-based search for tagged repos.
+	topicResults := searchGitHubByTopic(ctx, query, sort, limit/2)
 
-	return deduplicateSkills(codeResults), nil
+	all := append(repoResults, topicResults...)
+	return deduplicateSkills(all), nil
 }
 
-// searchGitHubCode searches for repos containing SKILL.md files using
-// `gh search code --filename SKILL.md`. Returns skills built from unique repos.
-func searchGitHubCode(ctx context.Context, query string, limit int) []Skill {
-	searchQuery := "SKILL.md"
-	if query != "" {
-		searchQuery = query + " SKILL.md"
+// searchGitHubByTopic searches for repos tagged with claude-skills or claude-code-skills topics.
+func searchGitHubByTopic(ctx context.Context, query string, sort string, limit int) []Skill {
+	if limit <= 0 {
+		return nil
 	}
 
-	args := []string{
-		"search", "code",
-		searchQuery,
-		"--filename", "SKILL.md",
-		"-L", fmt.Sprintf("%d", limit),
-		"--json", "repository,path",
-	}
-
-	cmd := exec.CommandContext(ctx, "gh", args...)
-	out, err := cmd.Output()
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil
+	// Try both common topic names.
+	var all []Skill
+	for _, topic := range []string{"claude-skills", "claude-code-skills"} {
+		args := []string{
+			"search", "repos",
+			"--topic", topic,
+			"--sort", sort,
+			"--limit", fmt.Sprintf("%d", limit),
+			"--json", "name,fullName,description,stargazersCount,createdAt,updatedAt,url",
 		}
-		log.Printf("skill: gh search code failed: %v", err)
-		return nil
-	}
 
-	var results []ghCodeSearchResult
-	if err := json.Unmarshal(out, &results); err != nil {
-		log.Printf("skill: parsing gh search code output: %v", err)
-		return nil
-	}
-
-	unique := deduplicateCodeResults(results)
-
-	skills := make([]Skill, 0, len(unique))
-	for _, r := range unique {
-		if r.Repository.IsPrivate {
+		cmd := exec.CommandContext(ctx, "gh", args...)
+		out, err := cmd.Output()
+		if err != nil {
 			continue
 		}
-		repoURL := fmt.Sprintf("https://github.com/%s", r.Repository.FullName)
-		skills = append(skills, Skill{
-			Name:        r.Repository.Name,
-			Description: r.Repository.Description,
-			Source:      SourceGitHub,
-			URL:         repoURL,
-			ReadmeURL:   repoURL + "#readme",
-		})
+
+		var repos []ghSearchRepo
+		if err := json.Unmarshal(out, &repos); err != nil {
+			continue
+		}
+
+		for _, r := range repos {
+			// If query provided, filter by name/description match.
+			if query != "" {
+				q := strings.ToLower(query)
+				if !strings.Contains(strings.ToLower(r.Name), q) &&
+					!strings.Contains(strings.ToLower(r.Description), q) {
+					continue
+				}
+			}
+			readmeURL := ""
+			if r.URL != "" {
+				readmeURL = r.URL + "#readme"
+			}
+			all = append(all, Skill{
+				Name:        r.Name,
+				Description: r.Description,
+				Source:      SourceGitHub,
+				URL:         r.URL,
+				Stars:       r.StargazersCount,
+				CreatedAt:   r.CreatedAt,
+				UpdatedAt:   r.UpdatedAt,
+				ReadmeURL:   readmeURL,
+			})
+		}
 	}
 
-	return skills
+	return all
 }
 
-// searchGitHubRepos is the fallback path using `gh search repos` with a refined
-// query that always prepends "claude code skill".
+// searchGitHubRepos uses `gh search repos` with a refined query
+// that always prepends "claude code skill".
 func searchGitHubRepos(ctx context.Context, query string, sort string, limit int) []Skill {
 	if limit <= 0 {
 		return nil

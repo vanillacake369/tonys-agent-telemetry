@@ -71,7 +71,7 @@ func main() {
 
 	// Test 5: GitHub skill search (if gh available)
 	fmt.Print("GitHub skill search... ")
-	ghSkills, err := skill.SearchGitHub(context.Background(), "claude code skill", "stars", 5)
+	ghSkills, err := skill.SearchGitHub(context.Background(), "security", "stars", 5)
 	if err != nil {
 		fmt.Printf("SKIP (gh not available or error: %v)\n", err)
 	} else {

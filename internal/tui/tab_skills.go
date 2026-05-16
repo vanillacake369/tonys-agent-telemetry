@@ -439,35 +439,42 @@ func (t SkillsTab) View() string {
 		return "Skills"
 	}
 
-	// Layout:
-	//   search bar : 1 line
-	//   gap        : 1 line
-	//   list+preview: remaining height - 1 (hint)
-	//   hint bar   : 1 line
-	const hintHeight = 1
-	const searchHeight = 1
-	const gapHeight = 1
-	listHeight := max(1, t.height-searchHeight-gapHeight-hintHeight)
-
-	sortLabel := fmt.Sprintf("Sort: %s %s", sortByIcon(t.sortBy), sortByLabel(t.sortBy))
-	searchBar := RenderSearchBar(t.searchInput, t.width, sortLabel, t.searchInput.Focused())
+	// Layout: search input is embedded inside the Skills panel (1 line).
+	// The full height is used for the list+preview panels.
+	listHeight := max(3, t.height)
 
 	leftW, rightW, showPreview := SplitLayout(t.width, 45)
 
 	var splitView string
 	if showPreview {
-		leftContent := t.renderSkillList(max(1, leftW-2), max(1, listHeight-2))
+		leftContent := t.renderSkillListWithSearch(max(1, leftW-2), max(1, listHeight-2))
 		leftPanel := RenderPanel("Skills", leftContent, leftW, listHeight, true)
 		rightContent := t.renderPreview(max(1, rightW-2), max(1, listHeight-2))
 		rightPanel := RenderPanel("Preview", rightContent, rightW, listHeight, false)
 		splitView = lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
 	} else {
-		leftContent := t.renderSkillList(max(1, leftW-2), max(1, listHeight-2))
+		leftContent := t.renderSkillListWithSearch(max(1, leftW-2), max(1, listHeight-2))
 		splitView = RenderPanel("Skills", leftContent, leftW, listHeight, true)
 	}
-	hintBar := RenderHintBar("↵:analyze  o:open  s:sort  y:copy  r:refresh", t.width)
 
-	return strings.Join([]string{searchBar, "", splitView, hintBar}, "\n")
+	return splitView
+}
+
+// renderSkillListWithSearch renders a search input (with sort label) followed by the skill list.
+// The search input is embedded at the top of the panel content area.
+func (t SkillsTab) renderSkillListWithSearch(width, height int) string {
+	sortLabel := fmt.Sprintf("Sort: %s %s", sortByIcon(t.sortBy), sortByLabel(t.sortBy))
+	sortRendered := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).Render(sortLabel)
+	sortWidth := lipgloss.Width(sortRendered) + 2
+	inputWidth := max(1, width-sortWidth-2)
+	searchLine := lipgloss.JoinHorizontal(
+		lipgloss.Center,
+		lipgloss.NewStyle().Width(inputWidth).Render(" "+t.searchInput.View()),
+		lipgloss.NewStyle().Width(sortWidth).Align(lipgloss.Right).Render(sortRendered),
+	)
+	listHeight := max(1, height-1) // -1 for the search line
+	listContent := t.renderSkillList(width, listHeight)
+	return searchLine + "\n" + listContent
 }
 
 // renderSkillList renders the left panel with the filtered skill list.

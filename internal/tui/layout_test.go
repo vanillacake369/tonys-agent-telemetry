@@ -185,8 +185,8 @@ func TestRenderSearchBar_FocusedAddsBottomBorder(t *testing.T) {
 
 func TestRenderListItem_Selected(t *testing.T) {
 	result := RenderListItem("my item", true, 40)
-	if !strings.Contains(result, "> ") {
-		t.Error("selected item should contain '> ' prefix")
+	if !strings.Contains(result, "▸") {
+		t.Error("selected item should contain '▸' arrow indicator")
 	}
 	if !strings.Contains(result, "my item") {
 		t.Error("item should contain the text")
@@ -195,8 +195,8 @@ func TestRenderListItem_Selected(t *testing.T) {
 
 func TestRenderListItem_Normal(t *testing.T) {
 	result := RenderListItem("my item", false, 40)
-	if strings.Contains(result, "> ") {
-		t.Error("normal item should not contain '> ' prefix")
+	if strings.Contains(result, "▸") {
+		t.Error("normal item should not contain '▸' arrow indicator")
 	}
 	if !strings.Contains(result, "my item") {
 		t.Error("item should contain the text")

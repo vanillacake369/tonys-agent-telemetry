@@ -228,36 +228,37 @@ func (s SessionsTab) View() string {
 		return renderErrorState(s.err, s.width)
 	}
 
-	// Layout:
-	//   search bar : 1 line
-	//   gap        : 1 line
-	//   list+preview: remaining height - 1 (hint line at bottom)
-	//   hint bar   : 1 line
-	const hintHeight = 1
-	const searchHeight = 1
-	const gapHeight = 1
-	listHeight := max(1, s.height-searchHeight-gapHeight-hintHeight)
+	// Layout: search input is embedded inside the Sessions panel (1 line).
+	// The full height is used for the list+preview panels.
+	listHeight := max(3, s.height)
 
-	searchBar := RenderSearchBar(s.searchInput, s.width, "", s.searchInput.Focused())
 	leftW, rightW, showPreview := SplitLayout(s.width, 40)
 
 	var splitView string
 	if showPreview {
-		leftContent := s.renderSessionList(max(1, leftW-2), max(1, listHeight-2))
+		leftContent := s.renderSessionListWithSearch(max(1, leftW-2), max(1, listHeight-2))
 		leftPanel := RenderPanel("Sessions", leftContent, leftW, listHeight, true)
 		rightContent := s.renderPreview(max(1, rightW-2), max(1, listHeight-2))
 		rightPanel := RenderPanel("Preview", rightContent, rightW, listHeight, false)
 		splitView = lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
 	} else {
-		leftContent := s.renderSessionList(max(1, leftW-2), max(1, listHeight-2))
+		leftContent := s.renderSessionListWithSearch(max(1, leftW-2), max(1, listHeight-2))
 		splitView = RenderPanel("Sessions", leftContent, leftW, listHeight, true)
 	}
-	hintBar := RenderHintBar("↵:resume  f:fork  y:copy  r:refresh", s.width)
 
-	return strings.Join([]string{searchBar, "", splitView, hintBar}, "\n")
+	return splitView
 }
 
-// renderSessionList renders the left panel with the filtered sessions list.
+// renderSessionListWithSearch renders a search input line followed by the session list.
+// The search input is embedded at the top of the panel content area.
+func (s SessionsTab) renderSessionListWithSearch(width, height int) string {
+	searchLine := " " + s.searchInput.View()
+	listHeight := max(1, height-1) // -1 for the search line
+	listContent := s.renderSessionList(width, listHeight)
+	return searchLine + "\n" + listContent
+}
+
+// renderSessionList renders the filtered sessions list.
 func (s SessionsTab) renderSessionList(width, height int) string {
 	if len(s.filtered) == 0 {
 		return RenderEmptyState("No sessions found", width, height)
@@ -272,15 +273,17 @@ func (s SessionsTab) renderSessionList(width, height int) string {
 	var rows []string
 	for i := scrollOffset; i < len(s.filtered) && i < scrollOffset+height; i++ {
 		sess := s.filtered[i]
-		line := s.formatSessionLine(sess, max(1, width-2))
+		// Account for the 3-char " ▸ " / "   " prefix in RenderListItem.
+		line := s.formatSessionLine(sess, max(1, width-3))
 		rows = append(rows, RenderListItem(line, i == s.cursor, width))
 	}
 
 	return strings.Join(rows, "\n")
 }
 
-// formatSessionLine formats a single session entry for display.
-// Format: MM-DD HH:MM │ project │ first-prompt-truncated
+// formatSessionLine formats a single session entry using fixed-width columns for alignment.
+// Format: [date 11ch] [project 13ch] [prompt remaining]
+// Uses lipgloss MaxWidth for cell-width-aware truncation (handles CJK double-width chars).
 func (s SessionsTab) formatSessionLine(sess data.Session, maxWidth int) string {
 	timestamp := sess.Timestamp.Format("01-02 15:04")
 	project := filepath.Base(sess.CWD)
@@ -288,14 +291,21 @@ func (s SessionsTab) formatSessionLine(sess data.Session, maxWidth int) string {
 		project = filepath.Base(sess.ProjectDir)
 	}
 
-	prefix := fmt.Sprintf("%s │ %s │ ", timestamp, project)
-	remaining := maxWidth - len(prefix)
-	if remaining < 1 {
-		remaining = 1
+	const dateWidth = 11
+	const projWidth = 13
+	const sepWidth = 4 // "  " between each pair of columns = 2 separators × 2 spaces
+
+	truncStyle := func(width int) lipgloss.Style {
+		return lipgloss.NewStyle().MaxWidth(width).Width(width)
 	}
 
-	prompt := truncateToWidth(sess.FirstPrompt, remaining)
-	return prefix + prompt
+	dateCol := truncStyle(dateWidth).Render(timestamp)
+	projCol := truncStyle(projWidth).Render(project)
+
+	promptWidth := max(1, maxWidth-dateWidth-projWidth-sepWidth)
+	promptCol := lipgloss.NewStyle().MaxWidth(promptWidth).Render(sess.FirstPrompt)
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, dateCol, "  ", projCol, "  ", promptCol)
 }
 
 // renderPreview renders the right panel with the conversation preview.
@@ -317,7 +327,7 @@ func (s SessionsTab) renderPreview(width, height int) string {
 		case "user":
 			roleLabel = roleStyle.Foreground(colorPrimary).Render("[User]")
 		case "assistant":
-			roleLabel = roleStyle.Foreground(colorDim).Render("[Asst]")
+			roleLabel = roleStyle.Foreground(colorSuccess).Render("[Asst]")
 		default:
 			roleLabel = roleStyle.Render("[" + turn.Role + "]")
 		}

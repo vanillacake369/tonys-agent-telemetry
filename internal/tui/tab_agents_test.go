@@ -317,15 +317,17 @@ func TestAgentsTab_ViewWithSize(t *testing.T) {
 	if view == "" {
 		t.Error("View() should not be empty")
 	}
-	// Hint bar should be present with new single-key bindings.
-	if !strings.Contains(view, "↵:launch") {
-		t.Error("View() should contain hint '↵:launch'")
-	}
-	if !strings.Contains(view, "y:copy") {
-		t.Error("View() should contain hint 'y:copy'")
-	}
-	if !strings.Contains(view, "r:refresh") {
-		t.Error("View() should contain hint 'r:refresh'")
+
+	// Hints are now shown in the app-level status bar, not the tab's own View().
+	// Use a wide terminal so all hints fit on the single status bar line.
+	a := NewApp()
+	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 160, Height: 30})
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}}) // switch to Agents tab
+	appView := a.View()
+	for _, hint := range []string{"↵:launch", "y:copy", "r:refresh"} {
+		if !strings.Contains(appView, hint) {
+			t.Errorf("App.View() missing agents hint %q in status bar", hint)
+		}
 	}
 }
 

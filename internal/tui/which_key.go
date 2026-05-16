@@ -21,10 +21,6 @@ func (w WhichKeyOverlay) View() string {
 		return ""
 	}
 
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(colorPrimary)
-
 	categoryStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(colorText)
@@ -48,8 +44,6 @@ func (w WhichKeyOverlay) View() string {
 	}
 
 	lines := []string{
-		titleStyle.Render("Keybindings"),
-		"",
 		categoryStyle.Render("Navigation"),
 		renderRow("j/↓", "Move down    ", "k/↑", "Move up"),
 		renderRow("h/←", "Previous     ", "l/→", "Next"),
@@ -71,10 +65,11 @@ func (w WhichKeyOverlay) View() string {
 
 	content := strings.Join(lines, "\n")
 
-	panelStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(colorPrimary).
-		Padding(1, 3)
+	// Use the standard panel style for visual consistency with the rest of the UI.
+	// Add padding inside the panel so key columns are not flush against the border.
+	innerContent := lipgloss.NewStyle().Padding(1, 3).Render(content)
+	panelWidth := lipgloss.Width(innerContent) + 4  // +4 for left/right border chars + margin
+	panelHeight := lipgloss.Height(innerContent) + 4 // +4 for top/bottom border + title line
 
-	return panelStyle.Render(content)
+	return RenderPanel("Keybindings", innerContent, panelWidth, panelHeight, true)
 }

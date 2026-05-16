@@ -290,14 +290,17 @@ func TestSessionsTab_Init_ReturnsCmd(t *testing.T) {
 }
 
 func TestSessionsTab_View_ContainsStatusHints(t *testing.T) {
-	s := NewSessionsTab()
-	s, _ = updateSessionsTab(t, s, SessionsLoadedMsg{Sessions: makeSessions(), Err: nil})
-	s = s.SetSize(80, 24).(SessionsTab)
+	// Hints are now shown in the app-level status bar, not the tab's own View().
+	// Use a wide terminal so all hints fit on the single status bar line.
+	a := NewApp()
+	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 160, Height: 30})
+	sessions := makeSessions()
+	a.tabs[TabSessions], _ = a.tabs[TabSessions].Update(SessionsLoadedMsg{Sessions: sessions, Err: nil})
 
-	view := s.View()
+	view := a.View()
 	for _, hint := range []string{"↵:resume", "f:fork", "y:copy", "r:refresh"} {
 		if !strings.Contains(view, hint) {
-			t.Errorf("View() missing hint %q", hint)
+			t.Errorf("App.View() missing sessions hint %q in status bar", hint)
 		}
 	}
 }

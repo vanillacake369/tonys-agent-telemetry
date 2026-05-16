@@ -218,8 +218,9 @@ func TestApp_ViewContainsNumberedTabPrefixes(t *testing.T) {
 }
 
 func TestApp_ViewContainsStatusBar(t *testing.T) {
+	// Use a wide terminal to ensure the full status bar including q:quit is visible.
 	a := NewApp()
-	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 80, Height: 24})
+	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 150, Height: 24})
 	view := a.View()
 	if !strings.Contains(view, "q:quit") {
 		t.Errorf("View() missing status bar hint 'q:quit'")

@@ -271,35 +271,35 @@ func (t AgentsTab) View() string {
 		return "Agents\n" + t.renderList(40, 10)
 	}
 
-	// Layout:
-	//   search bar : 1 line
-	//   gap        : 1 line
-	//   list+preview: remaining height - 1 (hint)
-	//   hint bar   : 1 line
-	const hintHeight = 1
-	const searchHeight = 1
-	const gapHeight = 1
-	listHeight := max(1, t.height-searchHeight-gapHeight-hintHeight)
+	// Layout: search input is embedded inside the Agents panel (1 line).
+	// The full height is used for the list+preview panels.
+	listHeight := max(3, t.height)
 
 	t.searchInput.Width = max(1, t.width-6)
-	searchBar := RenderSearchBar(t.searchInput, t.width, "", t.searchInput.Focused())
-
 	leftW, rightW, showPreview := SplitLayout(t.width, 50)
 
 	var splitView string
 	if showPreview {
-		leftContent := t.renderList(max(1, leftW-2), max(1, listHeight-2))
+		leftContent := t.renderListWithSearch(max(1, leftW-2), max(1, listHeight-2))
 		leftPanel := RenderPanel("Agents", leftContent, leftW, listHeight, true)
 		rightContent := t.renderPreview(max(1, rightW-2), max(1, listHeight-2))
 		rightPanel := RenderPanel("Preview", rightContent, rightW, listHeight, false)
 		splitView = lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
 	} else {
-		leftContent := t.renderList(max(1, leftW-2), max(1, listHeight-2))
+		leftContent := t.renderListWithSearch(max(1, leftW-2), max(1, listHeight-2))
 		splitView = RenderPanel("Agents", leftContent, leftW, listHeight, true)
 	}
-	hintBar := RenderHintBar("↵:launch  y:copy  r:refresh  ↑/↓ or j/k:navigate", t.width)
 
-	return strings.Join([]string{searchBar, "", splitView, hintBar}, "\n")
+	return splitView
+}
+
+// renderListWithSearch renders a search input line followed by the agent list.
+// The search input is embedded at the top of the panel content area.
+func (t AgentsTab) renderListWithSearch(width, height int) string {
+	searchLine := " " + t.searchInput.View()
+	listHeight := max(1, height-1) // -1 for the search line
+	listContent := t.renderList(width, listHeight)
+	return searchLine + "\n" + listContent
 }
 
 // renderList returns the agent list lines truncated to fit within the pane.
@@ -341,18 +341,19 @@ func (t AgentsTab) renderList(width, height int) string {
 			model = model[idx+1:]
 		}
 		desc := a.Description
-		if len(desc) > 30 {
-			desc = desc[:27] + "..."
+		if len([]rune(desc)) > 30 {
+			desc = string([]rune(desc)[:27]) + "…"
 		}
 
 		line := fmt.Sprintf("%s  %-20s │ %-8s │ %s", icon, a.Name, model, desc)
 
-		// Truncate to fit width.
-		if len(line) > width {
-			line = line[:width]
+		// Truncate to fit content width (account for 3-char " ▸ " / "   " prefix in RenderListItem).
+		contentWidth := max(1, width-3)
+		if len([]rune(line)) > contentWidth {
+			line = string([]rune(line)[:contentWidth])
 		}
 
-		lines = append(lines, RenderListItem(line, i == t.cursor, width+2))
+		lines = append(lines, RenderListItem(line, i == t.cursor, width))
 	}
 
 	return strings.Join(lines, "\n")

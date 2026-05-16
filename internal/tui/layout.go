@@ -168,19 +168,21 @@ func RenderHintBar(hints string, width int) string {
 }
 
 // RenderListItem renders a single list entry with a cursor indicator.
-// selected items show ">" prefix in primary color; others show "  " in dim color.
+// selected items get a full-width background highlight with "▸" prefix;
+// others show 3-space indent matching the arrow width.
 func RenderListItem(text string, selected bool, width int) string {
 	if selected {
 		return lipgloss.NewStyle().
-			Foreground(colorPrimary).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(colorPrimary).
 			Bold(true).
 			Width(max(0, width)).
-			Render("> " + text)
+			Render(" ▸ " + text)
 	}
 	return lipgloss.NewStyle().
-		Foreground(colorDim).
+		Foreground(colorText).
 		Width(max(0, width)).
-		Render("  " + text)
+		Render("   " + text)
 }
 
 // RenderPreviewPane renders the right preview panel with a left border separator.
@@ -213,9 +215,23 @@ func RenderEmptyState(message string, width, height int) string {
 	)
 }
 
-// RenderLoadingState renders a centered loading indicator.
+// RenderLoadingState renders a centered styled loading indicator.
 func RenderLoadingState(width, height int) string {
-	return RenderEmptyState("Loading...", width, height)
+	spinner := lipgloss.NewStyle().
+		Foreground(colorPrimary).
+		Bold(true).
+		Render("● Loading")
+	subtitle := lipgloss.NewStyle().
+		Foreground(colorDim).
+		Render("Fetching data...")
+	content := spinner + "\n" + subtitle
+	return lipgloss.Place(
+		max(0, width),
+		max(0, height),
+		lipgloss.Center,
+		lipgloss.Center,
+		content,
+	)
 }
 
 // renderErrorState renders an error message in error color.
@@ -226,7 +242,8 @@ func renderErrorState(err error, width int) string {
 		Render("Error: " + err.Error())
 }
 
-// truncateToWidth truncates a rune slice to at most maxWidth visible characters.
+// truncateToWidth truncates a rune slice to at most maxWidth visible characters,
+// appending "…" when the string is shortened.
 func truncateToWidth(s string, maxWidth int) string {
 	if maxWidth <= 0 {
 		return ""
@@ -235,7 +252,10 @@ func truncateToWidth(s string, maxWidth int) string {
 	if len(runes) <= maxWidth {
 		return s
 	}
-	return string(runes[:maxWidth])
+	if maxWidth <= 1 {
+		return "…"
+	}
+	return string(runes[:maxWidth-1]) + "…"
 }
 
 // wrapLines wraps/truncates a multi-line string so each line fits in width,
