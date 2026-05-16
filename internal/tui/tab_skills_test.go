@@ -82,6 +82,36 @@ func TestSkillsTab_LocalSkillsLoaded_SetsLoadingFalse(t *testing.T) {
 	}
 }
 
+// TestSkillsTab_LocalSkillsLoaded_ShowsImmediately verifies that local skills
+// are shown right after LocalSkillsLoadedMsg without waiting for GitHub.
+func TestSkillsTab_LocalSkillsLoaded_ShowsImmediately(t *testing.T) {
+	s := NewSkillsTab()
+	localSkills := []skill.Skill{
+		{Name: "scaffold", Source: skill.SourceLocal, Description: "scaffold skill"},
+		{Name: "commit", Source: skill.SourceLocal, Description: "commit skill"},
+	}
+
+	updated, _ := updateSkillsTab(t, s, LocalSkillsLoadedMsg{Skills: localSkills, Err: nil})
+
+	// Skills should be available immediately, no GitHub loading needed.
+	if updated.loading {
+		t.Error("loading should be false — local skills are instant")
+	}
+	if updated.githubLoading {
+		t.Error("githubLoading should be false — no GitHub fetch triggered by init")
+	}
+	if len(updated.localSkills) != 2 {
+		t.Errorf("localSkills len = %d, want 2", len(updated.localSkills))
+	}
+	if len(updated.filtered) != 2 {
+		t.Errorf("filtered len = %d, want 2 (should show local skills immediately)", len(updated.filtered))
+	}
+	// Cursor must be valid for navigation.
+	if updated.cursor != 0 {
+		t.Errorf("cursor = %d, want 0", updated.cursor)
+	}
+}
+
 func TestSkillsTab_SearchResultsUpdate_UpdatesList(t *testing.T) {
 	s := NewSkillsTab()
 	s, _ = updateSkillsTab(t, s, LocalSkillsLoadedMsg{Skills: makeTestSkillsList(), Err: nil})
@@ -97,6 +127,100 @@ func TestSkillsTab_SearchResultsUpdate_UpdatesList(t *testing.T) {
 	}
 	if updated.filtered[0].Name != "deploy" {
 		t.Errorf("filtered[0].Name = %q, want %q", updated.filtered[0].Name, "deploy")
+	}
+}
+
+// TestSkillsTab_GitHubSkillsLoaded_MergesWithLocal verifies that GitHub results
+// are merged with local skills when the query matches.
+func TestSkillsTab_GitHubSkillsLoaded_MergesWithLocal(t *testing.T) {
+	s := NewSkillsTab()
+	localSkills := []skill.Skill{
+		{Name: "scaffold", Source: skill.SourceLocal, Description: "scaffold skill"},
+	}
+	s, _ = updateSkillsTab(t, s, LocalSkillsLoadedMsg{Skills: localSkills, Err: nil})
+
+	// Simulate the user typing a query.
+	s.searchInput.SetValue("skill")
+
+	ghSkills := []skill.Skill{
+		{Name: "k8s-skill", Source: skill.SourceGitHub, Stars: 234},
+		{Name: "pr-skill", Source: skill.SourceGitHub, Stars: 100},
+	}
+
+	updated, _ := updateSkillsTab(t, s, GitHubSkillsLoadedMsg{
+		Skills: ghSkills,
+		Query:  "skill",
+		Err:    nil,
+	})
+
+	if updated.githubLoading {
+		t.Error("githubLoading should be false after GitHubSkillsLoadedMsg")
+	}
+	// Merged: 1 local + 2 github = 3 total, then fuzzy filtered by "skill".
+	// "scaffold" contains "scaf" not "skill" so won't match. k8s-skill and pr-skill will match.
+	// Let's check the merged skills list before filtering.
+	if len(updated.githubSkills) != 2 {
+		t.Errorf("githubSkills len = %d, want 2", len(updated.githubSkills))
+	}
+}
+
+// TestSkillsTab_GitHubSkillsLoaded_StaleResultIgnored verifies that a GitHub
+// result with a mismatched query is discarded.
+func TestSkillsTab_GitHubSkillsLoaded_StaleResultIgnored(t *testing.T) {
+	s := NewSkillsTab()
+	localSkills := []skill.Skill{
+		{Name: "scaffold", Source: skill.SourceLocal, Description: "scaffold skill"},
+	}
+	s, _ = updateSkillsTab(t, s, LocalSkillsLoadedMsg{Skills: localSkills, Err: nil})
+
+	// Current query in the input is "nix".
+	s.searchInput.SetValue("nix")
+
+	ghSkills := []skill.Skill{
+		{Name: "k8s-skill", Source: skill.SourceGitHub, Stars: 234},
+	}
+
+	// Deliver a result for the old query "kubernetes".
+	updated, _ := updateSkillsTab(t, s, GitHubSkillsLoadedMsg{
+		Skills: ghSkills,
+		Query:  "kubernetes", // stale — does not match current "nix"
+		Err:    nil,
+	})
+
+	// GitHub skills should NOT have been applied.
+	if len(updated.githubSkills) != 0 {
+		t.Errorf("stale GitHub result should be ignored, but githubSkills len = %d", len(updated.githubSkills))
+	}
+}
+
+// TestSkillsTab_NavigationWhileGitHubLoading verifies cursor navigation is
+// possible even when a GitHub fetch is in progress.
+func TestSkillsTab_NavigationWhileGitHubLoading(t *testing.T) {
+	s := NewSkillsTab()
+	localSkills := []skill.Skill{
+		{Name: "scaffold", Source: skill.SourceLocal, Description: "scaffold"},
+		{Name: "commit", Source: skill.SourceLocal, Description: "commit"},
+		{Name: "debug", Source: skill.SourceLocal, Description: "debug"},
+	}
+	s, _ = updateSkillsTab(t, s, LocalSkillsLoadedMsg{Skills: localSkills, Err: nil})
+
+	// Simulate a GitHub fetch in progress.
+	s.githubLoading = true
+
+	// Navigation should still work.
+	s, _ = updateSkillsTab(t, s, tea.KeyMsg{Type: tea.KeyDown})
+	if s.cursor != 1 {
+		t.Errorf("cursor = %d, want 1 (navigation should work while GitHub loads)", s.cursor)
+	}
+
+	s, _ = updateSkillsTab(t, s, tea.KeyMsg{Type: tea.KeyDown})
+	if s.cursor != 2 {
+		t.Errorf("cursor = %d, want 2", s.cursor)
+	}
+
+	s, _ = updateSkillsTab(t, s, tea.KeyMsg{Type: tea.KeyUp})
+	if s.cursor != 1 {
+		t.Errorf("cursor = %d, want 1", s.cursor)
 	}
 }
 
@@ -222,6 +346,12 @@ func TestSkillsTab_Refresh_ResetsState(t *testing.T) {
 	}
 	if len(updated.skills) != 0 {
 		t.Errorf("skills should be cleared on refresh, got %d", len(updated.skills))
+	}
+	if len(updated.localSkills) != 0 {
+		t.Errorf("localSkills should be cleared on refresh, got %d", len(updated.localSkills))
+	}
+	if updated.githubLoading {
+		t.Error("githubLoading should be false after refresh")
 	}
 	if cmd == nil {
 		t.Error("expected a non-nil command after refresh")

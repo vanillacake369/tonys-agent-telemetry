@@ -105,6 +105,54 @@ func RenderSplitView(left, right string, leftWidth, rightWidth, height int, show
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftPane, sep, rightPane)
 }
 
+// RenderPanel wraps content in a rounded-border panel with a header title in
+// the top-left corner. When active is true the border uses the primary accent
+// color instead of the dim border color.
+//
+// width and height are the outer dimensions of the panel (including the border
+// characters). Content is clipped / padded to fit inside.
+func RenderPanel(title, content string, width, height int, active bool) string {
+	if width < 4 || height < 3 {
+		return content
+	}
+
+	style := PanelStyle
+	if active {
+		style = ActivePanelStyle
+	}
+
+	// Inner dimensions: subtract 2 for left+right borders and top+bottom borders.
+	innerW := max(0, width-2)
+	innerH := max(0, height-2)
+
+	rendered := style.
+		Width(innerW).
+		Height(innerH).
+		Render(content)
+
+	// Inject the title into the rendered output's first line so it appears
+	// inside the top border after the "╭" character.
+	if title != "" {
+		header := PanelHeaderStyle.Render(" " + title + " ")
+		lines := strings.SplitN(rendered, "\n", 2)
+		if len(lines) >= 1 {
+			topLine := []rune(lines[0])
+			headerRunes := []rune(header)
+			// Replace runes starting at position 1 (after the corner char).
+			for i, r := range headerRunes {
+				pos := 1 + i
+				if pos < len(topLine)-1 { // keep trailing corner char
+					topLine[pos] = r
+				}
+			}
+			lines[0] = string(topLine)
+			rendered = strings.Join(lines, "\n")
+		}
+	}
+
+	return rendered
+}
+
 // RenderHintBar renders a single hint line padded to the given width.
 func RenderHintBar(hints string, width int) string {
 	return lipgloss.NewStyle().

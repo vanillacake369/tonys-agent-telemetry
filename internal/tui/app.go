@@ -56,6 +56,7 @@ type App struct {
 	width         int
 	height        int
 	searchFocused bool // when true, key events pass directly to the active tab
+	whichKey      WhichKeyOverlay
 	fifoEvents    <-chan event.Event // nil when FIFO is not active
 	fifoCancel    context.CancelFunc
 }
@@ -63,6 +64,10 @@ type App struct {
 const (
 	tabBarHeight    = 1
 	statusBarHeight = 1
+	// outerBorderHeight accounts for top+bottom border lines of the outer frame.
+	outerBorderHeight = 2
+	// outerBorderWidth accounts for left+right border chars of the outer frame.
+	outerBorderWidth = 2
 )
 
 // NewApp creates and returns an initialised App with placeholder tab models.
@@ -125,6 +130,17 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case tea.KeyMsg:
+		// Ctrl+C always quits, even when overlay or search is active.
+		if msg.Type == tea.KeyCtrlC {
+			return a, tea.Quit
+		}
+
+		// When the which-key overlay is visible, any keypress closes it.
+		if a.whichKey.visible {
+			a.whichKey.visible = false
+			return a, nil
+		}
+
 		// Esc always unfocuses search, regardless of current mode.
 		if key.Matches(msg, a.keys.Escape) {
 			if a.searchFocused {
@@ -134,11 +150,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, cmd
 			}
 			return a, nil
-		}
-
-		// Ctrl+C always quits.
-		if msg.Type == tea.KeyCtrlC {
-			return a, tea.Quit
 		}
 
 		// Tab / Shift+Tab cycle tabs regardless of search focus.
@@ -156,6 +167,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			updated, cmd := a.tabs[a.activeTab].Update(msg)
 			a.tabs[a.activeTab] = updated
 			return a, cmd
+		}
+
+		// Navigation mode: "?" opens the which-key overlay.
+		if key.Matches(msg, a.keys.Help) {
+			a.whichKey.visible = true
+			return a, nil
 		}
 
 		// Navigation mode: "/" focuses search.
@@ -202,19 +219,41 @@ func (a App) View() string {
 		return renderTabBar(a.activeTab, 80) + "\n" + a.tabs[a.activeTab].View()
 	}
 
-	tabBar := renderTabBar(a.activeTab, a.width)
+	// Inner width/height: subtract outer border chars.
+	innerW := max(0, a.width-outerBorderWidth)
+
+	tabBar := renderTabBar(a.activeTab, innerW)
 	content := ContentStyle.
-		Width(a.width).
+		Width(innerW).
 		Height(a.contentHeight()).
 		Render(a.tabs[a.activeTab].View())
-	statusBar := a.renderStatusBar(a.width)
+	statusBar := a.renderStatusBar(innerW)
 
-	return strings.Join([]string{tabBar, content, statusBar}, "\n")
+	inner := strings.Join([]string{tabBar, content, statusBar}, "\n")
+	full := OuterBorderStyle.
+		Width(innerW).
+		Render(inner)
+
+	// Render the which-key overlay centered on top of the full view.
+	if a.whichKey.visible {
+		a.whichKey.width = a.width
+		a.whichKey.height = a.height
+		overlay := a.whichKey.View()
+		return lipgloss.Place(
+			a.width, a.height,
+			lipgloss.Center, lipgloss.Center,
+			overlay,
+			lipgloss.WithWhitespaceForeground(colorDim),
+		)
+	}
+
+	return full
 }
 
 // contentHeight returns the number of rows available for tab content.
+// It subtracts the tab bar, status bar, and the two outer border rows.
 func (a App) contentHeight() int {
-	h := a.height - tabBarHeight - statusBarHeight
+	h := a.height - tabBarHeight - statusBarHeight - outerBorderHeight
 	if h < 0 {
 		return 0
 	}
@@ -223,7 +262,7 @@ func (a App) contentHeight() int {
 
 // propagateSize distributes the current terminal dimensions to every tab model.
 func (a App) propagateSize() App {
-	cw := a.width
+	cw := max(0, a.width-outerBorderWidth)
 	ch := a.contentHeight()
 	for tab, m := range a.tabs {
 		a.tabs[tab] = m.SetSize(cw, ch)
@@ -288,7 +327,7 @@ func (a App) renderStatusBar(width int) string {
 		// Normal mode: show tab switching hints and context-specific hints.
 		globalHints := "NORMAL │ 1:sessions 2:agents 3:dag 4:skills"
 		tabSpecific := a.tabHints()
-		quitHint := "/:search  q:quit"
+		quitHint := "/:search  ?:help  q:quit"
 
 		var parts []string
 		parts = append(parts, globalHints)

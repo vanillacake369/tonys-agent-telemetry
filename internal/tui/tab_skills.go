@@ -32,8 +32,21 @@ type LocalSkillsLoadedMsg struct {
 	Err    error
 }
 
+// GitHubSkillsLoadedMsg is sent when the async GitHub fetch completes.
+type GitHubSkillsLoadedMsg struct {
+	Skills []skill.Skill
+	Query  string // to verify it matches current query
+	Err    error
+}
+
 // skillsDebounceMsg is an internal tick used to trigger a debounced search.
 type skillsDebounceMsg struct {
+	query  string
+	sortBy skill.SortBy
+}
+
+// skillsGitHubDebounceMsg is an internal tick used to trigger a debounced GitHub search.
+type skillsGitHubDebounceMsg struct {
 	query  string
 	sortBy skill.SortBy
 }
@@ -41,15 +54,18 @@ type skillsDebounceMsg struct {
 // SkillsTab implements TabModel for the Skills tab.
 type SkillsTab struct {
 	fetcher       *skill.Fetcher
-	skills        []skill.Skill
-	filtered      []skill.Skill
+	localSkills   []skill.Skill // always available, loaded at init
+	githubSkills  []skill.Skill // fetched async on query >= 3 chars
+	skills        []skill.Skill // merged: local + github
+	filtered      []skill.Skill // after fuzzy filter
 	cursor        int
 	searchInput   textinput.Model
 	preview       string
 	sortBy        skill.SortBy
 	width         int
 	height        int
-	loading       bool
+	loading       bool // initial local load
+	githubLoading bool // github fetch in progress
 	err           error
 	cancelFn      context.CancelFunc
 	lastKeystroke time.Time
@@ -87,9 +103,24 @@ func (t SkillsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 	case LocalSkillsLoadedMsg:
 		t.loading = false
 		t.err = msg.Err
+		t.localSkills = msg.Skills
 		t.skills = msg.Skills
 		t.filtered = msg.Skills
 		t.cursor = 0
+		return t, t.loadReadmeCmd()
+
+	case GitHubSkillsLoadedMsg:
+		t.githubLoading = false
+		// Ignore stale results that no longer match the current query.
+		if msg.Query != t.searchInput.Value() {
+			return t, nil
+		}
+		if msg.Err == nil {
+			t.githubSkills = msg.Skills
+			// Merge: local (fuzzy filtered) + github results.
+			t.skills = mergeLocalAndGitHub(t.localSkills, msg.Skills, t.sortBy)
+			t.applyFilter()
+		}
 		return t, t.loadReadmeCmd()
 
 	case SkillsSearchResultMsg:
@@ -114,9 +145,17 @@ func (t SkillsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		return t, nil
 
 	case skillsDebounceMsg:
-		// Only fire if the query and sort still match (user hasn't typed more).
+		// Legacy debounce: only fire if the query and sort still match.
 		if msg.query == t.searchInput.Value() && msg.sortBy == t.sortBy {
 			return t, t.searchCmd(msg.query, msg.sortBy)
+		}
+		return t, nil
+
+	case skillsGitHubDebounceMsg:
+		// Only fire GitHub search if the query and sort still match.
+		if msg.query == t.searchInput.Value() && msg.sortBy == t.sortBy {
+			t.githubLoading = true
+			return t, t.fetchGitHubCmd(msg.query, msg.sortBy)
 		}
 		return t, nil
 
@@ -140,11 +179,20 @@ func (t SkillsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 				t.lastKeystroke = time.Now()
 				query := t.searchInput.Value()
 				sortBy := t.sortBy
-				// Debounce: schedule a search after 300ms.
-				cmds = append(cmds, func() tea.Msg {
-					time.Sleep(300 * time.Millisecond)
-					return skillsDebounceMsg{query: query, sortBy: sortBy}
-				})
+
+				// Show local results immediately with fuzzy filter.
+				t.applyFilter()
+
+				// Schedule GitHub search in background (only for queries >= 3 chars).
+				if len(query) >= 3 {
+					cmds = append(cmds, t.scheduleGitHubSearch(query, sortBy))
+				} else {
+					// Query too short — clear GitHub results, show only local.
+					t.githubSkills = nil
+					t.githubLoading = false
+					t.skills = t.localSkills
+					t.applyFilter()
+				}
 			}
 			return t, tea.Batch(cmds...)
 		}
@@ -153,10 +201,13 @@ func (t SkillsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		switch {
 		case key.Matches(msg, t.keys.Refresh):
 			t.loading = true
+			t.localSkills = nil
+			t.githubSkills = nil
 			t.skills = nil
 			t.filtered = nil
 			t.preview = ""
 			t.cursor = 0
+			t.githubLoading = false
 			t.cancelInFlight()
 			return t, t.Init()
 
@@ -205,6 +256,61 @@ func (t SkillsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		cmds = append(cmds, inputCmd)
 	}
 	return t, tea.Batch(cmds...)
+}
+
+// scheduleGitHubSearch schedules a GitHub search with a 500ms debounce.
+func (t *SkillsTab) scheduleGitHubSearch(query string, sortBy skill.SortBy) tea.Cmd {
+	return func() tea.Msg {
+		time.Sleep(500 * time.Millisecond)
+		return skillsGitHubDebounceMsg{query: query, sortBy: sortBy}
+	}
+}
+
+// fetchGitHubCmd fires an async GitHub search and returns a GitHubSkillsLoadedMsg.
+func (t *SkillsTab) fetchGitHubCmd(query string, sortBy skill.SortBy) tea.Cmd {
+	t.cancelInFlight()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.cancelFn = cancel
+
+	fetcher := t.fetcher
+	return func() tea.Msg {
+		skills, err := fetcher.SearchRemote(ctx, query, sortBy)
+		return GitHubSkillsLoadedMsg{Skills: skills, Query: query, Err: err}
+	}
+}
+
+// applyFilter applies a fuzzy filter over t.skills using the current search query.
+// It updates t.filtered in-place and clamps t.cursor.
+func (t *SkillsTab) applyFilter() {
+	query := strings.ToLower(t.searchInput.Value())
+	if query == "" {
+		t.filtered = t.skills
+		if t.cursor >= len(t.filtered) {
+			t.cursor = max(0, len(t.filtered)-1)
+		}
+		return
+	}
+
+	filtered := make([]skill.Skill, 0, len(t.skills))
+	for _, s := range t.skills {
+		nameLower := strings.ToLower(s.Name)
+		descLower := strings.ToLower(s.Description)
+		if strings.Contains(nameLower, query) || strings.Contains(descLower, query) {
+			filtered = append(filtered, s)
+		}
+	}
+	t.filtered = filtered
+	if t.cursor >= len(t.filtered) {
+		t.cursor = max(0, len(t.filtered)-1)
+	}
+}
+
+// mergeLocalAndGitHub combines local and GitHub skills, local first.
+func mergeLocalAndGitHub(local, github []skill.Skill, sortBy skill.SortBy) []skill.Skill {
+	result := make([]skill.Skill, 0, len(local)+len(github))
+	result = append(result, local...)
+	result = append(result, github...)
+	return result
 }
 
 // searchCmd fires an async Search and cancels any prior in-flight request.
@@ -357,20 +463,30 @@ func (t SkillsTab) renderSkillList(width, height int) string {
 		return RenderEmptyState("Loading skills...", width, height)
 	}
 
-	if len(t.filtered) == 0 {
-		return RenderEmptyState("No skills found", width, height)
-	}
-
-	scrollOffset := t.cursor - height + 1
-	if scrollOffset < 0 {
-		scrollOffset = 0
-	}
-
 	var rows []string
-	for i := scrollOffset; i < len(t.filtered) && i < scrollOffset+height; i++ {
-		s := t.filtered[i]
-		line := formatSkillLine(s, max(1, width-3))
-		rows = append(rows, RenderListItem(line, i == t.cursor, width))
+
+	// Show the filtered skill items.
+	if len(t.filtered) > 0 {
+		scrollOffset := t.cursor - height + 1
+		if scrollOffset < 0 {
+			scrollOffset = 0
+		}
+
+		for i := scrollOffset; i < len(t.filtered) && i < scrollOffset+height; i++ {
+			s := t.filtered[i]
+			line := formatSkillLine(s, max(1, width-3))
+			rows = append(rows, RenderListItem(line, i == t.cursor, width))
+		}
+	}
+
+	// Show GitHub loading indicator if a fetch is in progress.
+	if t.githubLoading && len(rows) < height {
+		loadingLine := lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render("── GitHub results loading... ──")
+		rows = append(rows, loadingLine)
+	}
+
+	if len(rows) == 0 {
+		return RenderEmptyState("No skills found", width, height)
 	}
 
 	return strings.Join(rows, "\n")

@@ -25,6 +25,46 @@ func NewFetcher() *Fetcher {
 	}
 }
 
+// SearchLocal returns local skills immediately (no network).
+func (f *Fetcher) SearchLocal() ([]Skill, error) {
+	return ScanLocal()
+}
+
+// SearchRemote fetches GitHub results asynchronously.
+// Returns (nil, nil) when query is shorter than 3 characters.
+// Uses cache + rate limiter.
+func (f *Fetcher) SearchRemote(ctx context.Context, query string, sortBy SortBy) ([]Skill, error) {
+	if len(query) < 3 {
+		return nil, nil
+	}
+
+	cacheKey := cacheKeyFor(query, sortBy)
+	if cached, ok := f.cache.Get(cacheKey); ok {
+		return cached, nil
+	}
+
+	if err := f.limiter.Wait(ctx); err != nil {
+		if ctx.Err() != nil {
+			return nil, nil
+		}
+		return nil, nil
+	}
+
+	ghSortStr := sortByToGHSort(sortBy)
+	results, err := SearchGitHub(ctx, query, ghSortStr, 30)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, nil
+		}
+		log.Printf("skill: SearchRemote GitHub error: %v", err)
+		return nil, err
+	}
+
+	sortSkills(results, sortBy)
+	f.cache.Set(cacheKey, results)
+	return results, nil
+}
+
 // Search combines local + GitHub results. Checks cache first.
 // ctx is used for cancellation — tab switches cancel in-flight requests.
 // When offline or ctx is cancelled after local results are ready, local skills

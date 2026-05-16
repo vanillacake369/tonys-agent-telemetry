@@ -145,3 +145,62 @@ func TestCacheKeyFor(t *testing.T) {
 		t.Errorf("cacheKeyFor empty = %q, want %q", key2, ":1")
 	}
 }
+
+// TestFetcher_SearchLocal_ReturnsLocalSkills verifies that SearchLocal returns
+// only local skills (no network involved).
+func TestFetcher_SearchLocal_ReturnsLocalSkills(t *testing.T) {
+	f := NewFetcher()
+
+	skills, err := f.SearchLocal()
+	if err != nil {
+		t.Errorf("SearchLocal returned error: %v", err)
+	}
+	for _, s := range skills {
+		if s.Source != SourceLocal {
+			t.Errorf("SearchLocal returned non-local skill: source=%q name=%q", s.Source, s.Name)
+		}
+	}
+	t.Logf("SearchLocal returned %d local skills", len(skills))
+}
+
+// TestFetcher_SearchRemote_ShortQueryReturnsNil verifies that queries shorter than
+// 3 characters return nil without making a network call.
+func TestFetcher_SearchRemote_ShortQueryReturnsNil(t *testing.T) {
+	f := NewFetcher()
+	ctx := context.Background()
+
+	for _, query := range []string{"", "a", "ab"} {
+		skills, err := f.SearchRemote(ctx, query, SortByStars)
+		if err != nil {
+			t.Errorf("SearchRemote(%q) returned error: %v", query, err)
+		}
+		if skills != nil {
+			t.Errorf("SearchRemote(%q) returned %d skills, want nil (query too short)", query, len(skills))
+		}
+	}
+}
+
+// TestFetcher_SearchRemote_CachesResults verifies that SearchRemote caches its results
+// so a second call for the same query returns the cached value.
+func TestFetcher_SearchRemote_CachesResults(t *testing.T) {
+	f := NewFetcher()
+
+	// Pre-populate the cache with a known value.
+	cacheKey := cacheKeyFor("kubernetes", SortByStars)
+	expected := []Skill{
+		{Name: "k8s-skill", Source: SourceGitHub, Stars: 150},
+	}
+	f.cache.Set(cacheKey, expected)
+
+	ctx := context.Background()
+	got, err := f.SearchRemote(ctx, "kubernetes", SortByStars)
+	if err != nil {
+		t.Fatalf("SearchRemote returned error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d skills, want 1 (cache hit)", len(got))
+	}
+	if got[0].Name != "k8s-skill" {
+		t.Errorf("got[0].Name = %q, want %q", got[0].Name, "k8s-skill")
+	}
+}

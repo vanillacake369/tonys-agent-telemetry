@@ -63,6 +63,26 @@ var (
 	// TabSeparatorStyle renders the vertical separator between tab labels.
 	TabSeparatorStyle = lipgloss.NewStyle().
 				Foreground(colorDim)
+
+	// PanelStyle renders an inactive panel with a rounded border.
+	PanelStyle = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(colorBorder)
+
+	// ActivePanelStyle renders the focused panel with a primary-color border.
+	ActivePanelStyle = lipgloss.NewStyle().
+				BorderStyle(lipgloss.RoundedBorder()).
+				BorderForeground(colorPrimary)
+
+	// PanelHeaderStyle renders the title inside a panel's top border.
+	PanelHeaderStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(colorPrimary)
+
+	// OuterBorderStyle wraps the entire application in a rounded border.
+	OuterBorderStyle = lipgloss.NewStyle().
+				BorderStyle(lipgloss.RoundedBorder()).
+				BorderForeground(colorBorder)
 )
 
 // tabSeparator is the character placed between tab labels.

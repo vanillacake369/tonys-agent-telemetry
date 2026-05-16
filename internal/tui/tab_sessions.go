@@ -118,7 +118,7 @@ func (s SessionsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		case key.Matches(msg, s.keys.Enter):
 			if len(s.filtered) > 0 && s.cursor < len(s.filtered) {
 				session := s.filtered[s.cursor]
-				cmd := fmt.Sprintf("claude --resume %s", session.ID)
+				cmd := fmt.Sprintf("cd %q && claude --resume %s", session.CWD, session.ID)
 				_ = platform.Detect().OpenPane(cmd)
 			}
 			return s, nil
@@ -126,7 +126,7 @@ func (s SessionsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		case key.Matches(msg, s.keys.Fork):
 			if len(s.filtered) > 0 && s.cursor < len(s.filtered) {
 				session := s.filtered[s.cursor]
-				cmd := fmt.Sprintf("claude --resume %s --fork-session", session.ID)
+				cmd := fmt.Sprintf("cd %q && claude --resume %s --fork-session", session.CWD, session.ID)
 				_ = platform.Detect().OpenPane(cmd)
 			}
 			return s, nil

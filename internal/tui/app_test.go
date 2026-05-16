@@ -180,7 +180,7 @@ func TestApp_WindowResize(t *testing.T) {
 func TestApp_ContentHeightCalculation(t *testing.T) {
 	a := NewApp()
 	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 80, Height: 24})
-	want := 24 - tabBarHeight - statusBarHeight
+	want := 24 - tabBarHeight - statusBarHeight - outerBorderHeight
 	if got := a.contentHeight(); got != want {
 		t.Errorf("contentHeight = %d, want %d", got, want)
 	}
