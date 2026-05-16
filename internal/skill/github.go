@@ -192,12 +192,14 @@ func searchGitHubRepos(ctx context.Context, query string, sort string, limit int
 	return skills
 }
 
-// buildRefinedRepoQuery prepends "claude code skill" to the user query.
+// buildRefinedRepoQuery prepends "claude skill" to the user query.
+// Using "claude skill" instead of "claude code skill" to catch repos like
+// obra/superpowers that don't have "code" in their description.
 func buildRefinedRepoQuery(query string) string {
 	if query == "" {
-		return "claude code skill"
+		return "claude skill"
 	}
-	return fmt.Sprintf("claude code skill %s", query)
+	return fmt.Sprintf("claude skill %s", query)
 }
 
 // deduplicateCodeResults returns one entry per unique repository FullName.

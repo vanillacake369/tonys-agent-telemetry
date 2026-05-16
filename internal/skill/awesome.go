@@ -11,8 +11,11 @@ import (
 )
 
 // awesomeLists contains known awesome-list URLs for Claude Code skills.
+// These are the most popular curated lists (60K+, 12K+, 9K+ stars).
 var awesomeLists = []string{
-	"https://raw.githubusercontent.com/wong2/awesome-mcp-servers/main/README.md",
+	"https://raw.githubusercontent.com/travisvn/awesome-claude-skills/main/README.md",
+	"https://raw.githubusercontent.com/ComposioHQ/awesome-claude-skills/main/README.md",
+	"https://raw.githubusercontent.com/BehiSecc/awesome-claude-skills/main/README.md",
 }
 
 // linkRegex matches a single Markdown hyperlink: [text](url)

@@ -226,14 +226,13 @@ func TestDeduplicateCodeResults(t *testing.T) {
 func TestSearchGitHubRepos_BuildsRefinedQuery(t *testing.T) {
 	// Verify that buildRefinedRepoQuery adds the prefix.
 	got := buildRefinedRepoQuery("kubernetes")
-	want := "claude code skill kubernetes"
+	want := "claude skill kubernetes"
 	if got != want {
 		t.Errorf("buildRefinedRepoQuery = %q, want %q", got, want)
 	}
 
-	// Empty query — prefix only.
 	got2 := buildRefinedRepoQuery("")
-	want2 := "claude code skill"
+	want2 := "claude skill"
 	if got2 != want2 {
 		t.Errorf("buildRefinedRepoQuery(%q) = %q, want %q", "", got2, want2)
 	}
