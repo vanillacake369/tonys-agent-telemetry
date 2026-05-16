@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/data"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/platform"
@@ -11,6 +12,11 @@ import (
 )
 
 func main() {
+	if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".claude")); os.IsNotExist(err) {
+		fmt.Println("Skipping integration tests: ~/.claude not found")
+		return
+	}
+
 	failed := 0
 
 	// Test 1: Session discovery

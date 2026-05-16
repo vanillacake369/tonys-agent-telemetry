@@ -17,7 +17,7 @@
             pname = "tonys-agent-telemetry";
             inherit version;
             src = ./.;
-            vendorHash = "sha256-q7r9f5j06tceDXuivbBN+giLtchMTNQssKDfpxiYlDc=";
+            vendorHash = "sha256-abS9Oz46kVFZk63vEm8fAVb/zMhwsMAKbdioU6FRVRw=";
 
             subPackages = [ "." "cmd/hook-handler" ];
 
