@@ -33,9 +33,8 @@ func TestApp_TabSwitchingByNumber(t *testing.T) {
 		wantTab Tab
 	}{
 		{"1 -> Sessions", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}}, TabSessions},
-		{"2 -> Agents", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}}, TabAgents},
-		{"3 -> DAG", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}}, TabDAG},
-		{"4 -> Skills", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}}, TabSkills},
+		{"2 -> Skills", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}}, TabSkills},
+		{"3 -> Cost", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}}, TabCost},
 	}
 
 	for _, tc := range cases {
@@ -57,9 +56,8 @@ func TestApp_TabSwitchingRoundTrip(t *testing.T) {
 		key     tea.KeyMsg
 		wantTab Tab
 	}{
-		{tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}}, TabAgents},
-		{tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}}, TabDAG},
-		{tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}}, TabSkills},
+		{tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}}, TabSkills},
+		{tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}}, TabCost},
 		{tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}}, TabSessions},
 	}
 
@@ -77,33 +75,29 @@ func TestApp_TabCyclingWithTabKey(t *testing.T) {
 	a := NewApp()
 	// Start at Sessions (0), Tab should advance forward.
 	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyTab})
-	if a.activeTab != TabAgents {
-		t.Errorf("Tab from Sessions: activeTab = %d, want %d (TabAgents)", a.activeTab, TabAgents)
-	}
-	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyTab})
-	if a.activeTab != TabDAG {
-		t.Errorf("Tab from Agents: activeTab = %d, want %d (TabDAG)", a.activeTab, TabDAG)
-	}
-	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyTab})
 	if a.activeTab != TabSkills {
-		t.Errorf("Tab from DAG: activeTab = %d, want %d (TabSkills)", a.activeTab, TabSkills)
+		t.Errorf("Tab from Sessions: activeTab = %d, want %d (TabSkills)", a.activeTab, TabSkills)
+	}
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyTab})
+	if a.activeTab != TabCost {
+		t.Errorf("Tab from Skills: activeTab = %d, want %d (TabCost)", a.activeTab, TabCost)
 	}
 	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyTab})
 	if a.activeTab != TabSessions {
-		t.Errorf("Tab from Skills (wrap): activeTab = %d, want %d (TabSessions)", a.activeTab, TabSessions)
+		t.Errorf("Tab from Cost (wrap): activeTab = %d, want %d (TabSessions)", a.activeTab, TabSessions)
 	}
 }
 
 func TestApp_TabCyclingWithShiftTabKey(t *testing.T) {
 	a := NewApp()
-	// Start at Sessions (0), Shift+Tab should go backward (wrap to Skills).
+	// Start at Sessions (0), Shift+Tab should go backward (wrap to Cost).
 	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyShiftTab})
-	if a.activeTab != TabSkills {
-		t.Errorf("Shift+Tab from Sessions: activeTab = %d, want %d (TabSkills)", a.activeTab, TabSkills)
+	if a.activeTab != TabCost {
+		t.Errorf("Shift+Tab from Sessions: activeTab = %d, want %d (TabCost)", a.activeTab, TabCost)
 	}
 	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyShiftTab})
-	if a.activeTab != TabDAG {
-		t.Errorf("Shift+Tab from Skills: activeTab = %d, want %d (TabDAG)", a.activeTab, TabDAG)
+	if a.activeTab != TabSkills {
+		t.Errorf("Shift+Tab from Cost: activeTab = %d, want %d (TabSkills)", a.activeTab, TabSkills)
 	}
 }
 
@@ -199,7 +193,7 @@ func TestApp_ViewContainsTabNames(t *testing.T) {
 	a := NewApp()
 	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 80, Height: 24})
 	view := a.View()
-	for _, name := range []string{"Sessions", "Agents", "DAG", "Skills"} {
+	for _, name := range []string{"Sessions", "Skills", "Cost"} {
 		if !strings.Contains(view, name) {
 			t.Errorf("View() missing tab name %q", name)
 		}
@@ -210,7 +204,7 @@ func TestApp_ViewContainsNumberedTabPrefixes(t *testing.T) {
 	a := NewApp()
 	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 80, Height: 24})
 	view := a.View()
-	for _, prefix := range []string{"1:Sessions", "2:Agents", "3:DAG", "4:Skills"} {
+	for _, prefix := range []string{"1:Sessions", "2:Skills", "3:Cost"} {
 		if !strings.Contains(view, prefix) {
 			t.Errorf("View() missing numbered tab prefix %q", prefix)
 		}
@@ -281,7 +275,7 @@ func TestApp_ViewSearchMode_SearchFocusedTrue(t *testing.T) {
 
 func TestApp_SkillsTabHints_ContainsOpen(t *testing.T) {
 	a := NewApp()
-	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	hints := a.tabHints()
 	if !strings.Contains(hints, "o:open") {
 		t.Errorf("skills tab hints should contain 'o:open', got %q", hints)

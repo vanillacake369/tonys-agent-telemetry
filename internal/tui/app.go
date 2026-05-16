@@ -16,21 +16,19 @@ type Tab int
 
 const (
 	TabSessions Tab = iota
-	TabAgents
-	TabDAG
 	TabSkills
+	TabCost
 )
 
 // tabNames maps each Tab constant to its display label.
 var tabNames = map[Tab]string{
 	TabSessions: "Sessions",
-	TabAgents:   "Agents",
-	TabDAG:      "DAG",
 	TabSkills:   "Skills",
+	TabCost:     "Cost",
 }
 
 // tabOrder defines the left-to-right display order of tabs.
-var tabOrder = []Tab{TabSessions, TabAgents, TabDAG, TabSkills}
+var tabOrder = []Tab{TabSessions, TabSkills, TabCost}
 
 // TabModel is the interface that every tab sub-model must implement.
 // SetSize returns the updated model (value-receiver implementations must
@@ -75,9 +73,8 @@ func NewApp() App {
 	keys := DefaultKeyMap()
 	tabs := map[Tab]TabModel{
 		TabSessions: NewSessionsTab(),
-		TabAgents:   NewAgentsTab(),
-		TabDAG:      NewDAGTab(),
 		TabSkills:   NewSkillsTab(),
+		TabCost:     NewCostTab(),
 	}
 	return App{
 		activeTab:     TabSessions,
@@ -154,11 +151,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Tab / Shift+Tab cycle tabs regardless of search focus.
 		if key.Matches(msg, a.keys.NextTab) {
-			a.activeTab = (a.activeTab + 1) % 4
+			a.activeTab = (a.activeTab + 1) % 3
 			return a, nil
 		}
 		if key.Matches(msg, a.keys.PrevTab) {
-			a.activeTab = (a.activeTab + 3) % 4
+			a.activeTab = (a.activeTab + 2) % 3
 			return a, nil
 		}
 
@@ -189,13 +186,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.activeTab = TabSessions
 			return a, nil
 		case key.Matches(msg, a.keys.Tab2):
-			a.activeTab = TabAgents
+			a.activeTab = TabSkills
 			return a, nil
 		case key.Matches(msg, a.keys.Tab3):
-			a.activeTab = TabDAG
-			return a, nil
-		case key.Matches(msg, a.keys.Tab4):
-			a.activeTab = TabSkills
+			a.activeTab = TabCost
 			return a, nil
 		case key.Matches(msg, a.keys.Quit):
 			return a, tea.Quit
@@ -291,27 +285,24 @@ func (a App) tabHints() string {
 	switch a.activeTab {
 	case TabSessions:
 		return "↵:resume  f:fork  y:copy  r:refresh"
-	case TabAgents:
-		return "↵:launch  y:copy  r:refresh"
-	case TabDAG:
-		return "◄►:switch  ↑↓:scroll"
 	case TabSkills:
 		return "↵:analyze  o:open  s:sort  y:copy  r:refresh"
+	case TabCost:
+		return "r:refresh"
 	}
 	return ""
 }
 
 // renderTabBar returns the tab bar string for the given active tab and total width.
-// Uses k9s/btop-style numbered tabs: "1:Sessions │ 2:Agents │ 3:DAG │ 4:Skills"
+// Uses k9s/btop-style numbered tabs: "1:Sessions │ 2:Skills │ 3:Cost"
 func renderTabBar(active Tab, width int) string {
 	tabDefs := []struct {
 		num string
 		tab Tab
 	}{
 		{"1", TabSessions},
-		{"2", TabAgents},
-		{"3", TabDAG},
-		{"4", TabSkills},
+		{"2", TabSkills},
+		{"3", TabCost},
 	}
 
 	var parts []string
@@ -335,7 +326,7 @@ func renderTabBar(active Tab, width int) string {
 }
 
 // renderStatusBar returns a single-line status bar showing mode indicator and key hints.
-// Format (normal): NORMAL │ 1:sessions 2:agents 3:dag 4:skills │ <tab hints> │ /:search ?:help q:quit
+// Format (normal): NORMAL │ 1:sessions 2:skills 3:cost │ <tab hints> │ /:search ?:help q:quit
 // Format (search): SEARCH │ type to filter │ esc:back
 func (a App) renderStatusBar(width int) string {
 	innerWidth := max(0, width-StatusBarStyle.GetHorizontalPadding())
@@ -362,7 +353,7 @@ func (a App) renderStatusBar(width int) string {
 		// Build from right to left, dropping sections if they don't fit.
 		// Priority: mode > tab hints > global hints > tab numbers
 		globalHint := "/ search  ? help  q quit"
-		tabNums := "1-4:tabs"
+		tabNums := "1-3:tabs"
 
 		// Try full version first
 		var parts []string
