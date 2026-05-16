@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/platform"
 )
@@ -100,5 +99,3 @@ func readFirstLine(path string) string {
 	return ""
 }
 
-// skillsDir returns ~/.claude/skills for testing overrides.
-var _ = time.Now // keep time import used via Skill.CreatedAt

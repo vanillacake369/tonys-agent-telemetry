@@ -106,8 +106,8 @@ func TestFetchReadme_Base64Decoding(t *testing.T) {
 	}
 
 	// Simulate the decode path.
-	import_cleaned := resp.Content // no newlines in test data
-	decoded, err := base64.StdEncoding.DecodeString(import_cleaned)
+	cleaned := resp.Content // no newlines in test data
+	decoded, err := base64.StdEncoding.DecodeString(cleaned)
 	if err != nil {
 		t.Fatalf("base64 decode: %v", err)
 	}
