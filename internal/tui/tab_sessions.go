@@ -138,14 +138,14 @@ func (s SessionsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 			}
 			return s, nil
 
-		case msg.Type == tea.KeyUp || msg.String() == "k":
+		case key.Matches(msg, s.keys.Up):
 			if s.cursor > 0 {
 				s.cursor--
 				return s, s.loadPreviewCmd()
 			}
 			return s, nil
 
-		case msg.Type == tea.KeyDown || msg.String() == "j":
+		case key.Matches(msg, s.keys.Down):
 			if s.cursor < len(s.filtered)-1 {
 				s.cursor++
 				return s, s.loadPreviewCmd()
@@ -241,13 +241,17 @@ func (s SessionsTab) View() string {
 	searchBar := RenderSearchBar(s.searchInput, s.width, "")
 	leftW, rightW, showPreview := SplitLayout(s.width, 40)
 
-	left := s.renderSessionList(leftW, listHeight)
-	right := ""
+	var splitView string
 	if showPreview {
-		right = s.renderPreview(rightW, listHeight)
+		leftContent := s.renderSessionList(max(1, leftW-2), max(1, listHeight-2))
+		leftPanel := RenderPanel("Sessions", leftContent, leftW, listHeight, true)
+		rightContent := s.renderPreview(max(1, rightW-2), max(1, listHeight-2))
+		rightPanel := RenderPanel("Preview", rightContent, rightW, listHeight, false)
+		splitView = lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
+	} else {
+		leftContent := s.renderSessionList(max(1, leftW-2), max(1, listHeight-2))
+		splitView = RenderPanel("Sessions", leftContent, leftW, listHeight, true)
 	}
-
-	splitView := RenderSplitView(left, right, leftW, rightW, listHeight, showPreview)
 	hintBar := RenderHintBar("↵:resume  f:fork  y:copy  r:refresh", s.width)
 
 	return strings.Join([]string{searchBar, "", splitView, hintBar}, "\n")
@@ -332,10 +336,6 @@ func (s SessionsTab) renderPreview(width, height int) string {
 	return lipgloss.NewStyle().
 		Width(max(0, width)).
 		Height(max(0, height)).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderLeft(true).
-		BorderForeground(colorBorder).
-		PaddingLeft(1).
 		Render(previewContent)
 }
 

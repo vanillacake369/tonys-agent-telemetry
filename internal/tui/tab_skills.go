@@ -231,14 +231,14 @@ func (t SkillsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 			t.cancelInFlight()
 			return t, t.searchCmd(t.searchInput.Value(), t.sortBy)
 
-		case msg.Type == tea.KeyUp || msg.String() == "k":
+		case key.Matches(msg, t.keys.Up):
 			if t.cursor > 0 {
 				t.cursor--
 				return t, t.loadReadmeCmd()
 			}
 			return t, nil
 
-		case msg.Type == tea.KeyDown || msg.String() == "j":
+		case key.Matches(msg, t.keys.Down):
 			if t.cursor < len(t.filtered)-1 {
 				t.cursor++
 				return t, t.loadReadmeCmd()
@@ -445,13 +445,17 @@ func (t SkillsTab) View() string {
 
 	leftW, rightW, showPreview := SplitLayout(t.width, 45)
 
-	left := t.renderSkillList(leftW, listHeight)
-	right := ""
+	var splitView string
 	if showPreview {
-		right = t.renderPreview(rightW, listHeight)
+		leftContent := t.renderSkillList(max(1, leftW-2), max(1, listHeight-2))
+		leftPanel := RenderPanel("Skills", leftContent, leftW, listHeight, true)
+		rightContent := t.renderPreview(max(1, rightW-2), max(1, listHeight-2))
+		rightPanel := RenderPanel("Preview", rightContent, rightW, listHeight, false)
+		splitView = lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
+	} else {
+		leftContent := t.renderSkillList(max(1, leftW-2), max(1, listHeight-2))
+		splitView = RenderPanel("Skills", leftContent, leftW, listHeight, true)
 	}
-
-	splitView := RenderSplitView(left, right, leftW, rightW, listHeight, showPreview)
 	hintBar := RenderHintBar("↵:analyze  s:sort  y:copy  r:refresh", t.width)
 
 	return strings.Join([]string{searchBar, "", splitView, hintBar}, "\n")
@@ -524,30 +528,21 @@ func formatSkillLine(s skill.Skill, maxWidth int) string {
 	return prefix + suffix
 }
 
-// renderPreview renders the right preview panel.
+// renderPreview renders the right preview panel content.
 func (t SkillsTab) renderPreview(width, height int) string {
-	previewStyle := lipgloss.NewStyle().
-		Width(max(0, width)).
-		Height(max(0, height)).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderLeft(true).
-		BorderForeground(colorBorder).
-		PaddingLeft(1)
-
 	if len(t.filtered) == 0 {
-		return previewStyle.Render(
-			lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render("No skill selected"),
-		)
+		return lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render("No skill selected")
 	}
 
 	if t.preview == "" {
-		return previewStyle.Render(
-			lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render("Loading preview..."),
-		)
+		return lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render("Loading preview...")
 	}
 
-	contentWidth := max(10, width-4)
-	content := wrapLines(t.preview, contentWidth, max(1, height-2))
+	contentWidth := max(10, width-2)
+	content := wrapLines(t.preview, contentWidth, max(1, height))
 
-	return previewStyle.Render(content)
+	return lipgloss.NewStyle().
+		Width(max(0, width)).
+		Height(max(0, height)).
+		Render(content)
 }

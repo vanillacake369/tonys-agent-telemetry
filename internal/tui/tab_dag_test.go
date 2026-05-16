@@ -237,11 +237,12 @@ func TestDAGTab_SetSize_UpdatesViewport(t *testing.T) {
 	tab := NewDAGTab()
 	updated := tab.SetSize(100, 30).(DAGTab)
 
-	if updated.viewport.Width != 100 {
-		t.Errorf("viewport.Width = %d, want 100", updated.viewport.Width)
+	// Viewport width = total - 2 (panel left+right border)
+	if updated.viewport.Width != 98 {
+		t.Errorf("viewport.Width = %d, want 98", updated.viewport.Width)
 	}
-	// Viewport height = total - headerHeight(2) - footerHeight(2)
-	wantVpHeight := 30 - 2 - 2
+	// Viewport height = total - 4 (header+gap+stats+gap) - 2 (panel top+bottom border)
+	wantVpHeight := 30 - 4 - 2
 	if updated.viewport.Height != wantVpHeight {
 		t.Errorf("viewport.Height = %d, want %d", updated.viewport.Height, wantVpHeight)
 	}

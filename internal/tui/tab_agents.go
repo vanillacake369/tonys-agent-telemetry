@@ -233,7 +233,7 @@ func (t AgentsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 			}
 			return t, nil
 
-		case msg.Type == tea.KeyUp || msg.String() == "k":
+		case key.Matches(msg, t.keys.Up):
 			t.cursor--
 			t.clampCursor()
 			if a := t.selectedAgent(); a != nil {
@@ -241,7 +241,7 @@ func (t AgentsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 			}
 			return t, tea.Batch(cmds...)
 
-		case msg.Type == tea.KeyDown || msg.String() == "j":
+		case key.Matches(msg, t.keys.Down):
 			t.cursor++
 			t.clampCursor()
 			if a := t.selectedAgent(); a != nil {
@@ -286,13 +286,17 @@ func (t AgentsTab) View() string {
 
 	leftW, rightW, showPreview := SplitLayout(t.width, 50)
 
-	left := t.renderList(max(1, leftW-2), listHeight)
-	right := ""
+	var splitView string
 	if showPreview {
-		right = t.renderPreview(max(1, rightW-2), listHeight)
+		leftContent := t.renderList(max(1, leftW-2), max(1, listHeight-2))
+		leftPanel := RenderPanel("Agents", leftContent, leftW, listHeight, true)
+		rightContent := t.renderPreview(max(1, rightW-2), max(1, listHeight-2))
+		rightPanel := RenderPanel("Preview", rightContent, rightW, listHeight, false)
+		splitView = lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
+	} else {
+		leftContent := t.renderList(max(1, leftW-2), max(1, listHeight-2))
+		splitView = RenderPanel("Agents", leftContent, leftW, listHeight, true)
 	}
-
-	splitView := RenderSplitView(left, right, leftW, rightW, listHeight, showPreview)
 	hintBar := RenderHintBar("↵:launch  y:copy  r:refresh  ↑/↓ or j/k:navigate", t.width)
 
 	return strings.Join([]string{searchBar, "", splitView, hintBar}, "\n")
