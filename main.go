@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -21,6 +23,18 @@ func main() {
 			printUsage()
 			return
 		}
+	}
+
+	// Suppress log output during TUI — stderr corrupts the alt screen.
+	// Use --debug flag or TAT_DEBUG=1 to enable logging to a file.
+	if os.Getenv("TAT_DEBUG") == "1" {
+		f, err := os.OpenFile("/tmp/tat-debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err == nil {
+			log.SetOutput(f)
+			defer f.Close()
+		}
+	} else {
+		log.SetOutput(io.Discard)
 	}
 
 	// Create the FIFO for real-time hook events.
@@ -44,7 +58,7 @@ Usage:
   tonys-agent-telemetry --version    Print version
   tonys-agent-telemetry --help       Print this help
 
-Tabs (switch with Ctrl+S/A/D/K):
+Tabs (switch with 1/2/3/4):
   Sessions    Fuzzy-find and resume Claude sessions
   Agents      Browse and launch agents
   DAG         Live agent orchestration graph

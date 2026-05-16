@@ -68,9 +68,11 @@ type SkillsTab struct {
 	loading       bool // initial local load
 	githubLoading bool // github fetch in progress
 	err           error
-	cancelFn      context.CancelFunc
-	lastKeystroke time.Time
-	keys          KeyMap
+	cancelFn        context.CancelFunc
+	lastKeystroke   time.Time
+	lastPreviewURL  string // dedup: skip if same URL already fetched/fetching
+	previewCancelFn context.CancelFunc
+	keys            KeyMap
 }
 
 // NewSkillsTab creates an initialised SkillsTab.
@@ -379,32 +381,50 @@ func (t *SkillsTab) cancelInFlight() {
 }
 
 // loadReadmeCmd fetches README for the currently selected skill.
-func (t SkillsTab) loadReadmeCmd() tea.Cmd {
+// Deduplicates: skips if the same URL is already being fetched.
+// Cancels previous fetch if a new one starts.
+func (t *SkillsTab) loadReadmeCmd() tea.Cmd {
 	if len(t.filtered) == 0 || t.cursor >= len(t.filtered) {
 		return nil
 	}
 	s := t.filtered[t.cursor]
+
+	// Dedup: don't re-fetch same URL.
+	if s.URL == t.lastPreviewURL && t.preview != "" {
+		return nil
+	}
+	t.lastPreviewURL = s.URL
+
+	// Cancel previous preview fetch.
+	if t.previewCancelFn != nil {
+		t.previewCancelFn()
+	}
+
 	if s.Source == skill.SourceLocal {
-		// No remote readme for local skills.
 		return func() tea.Msg {
 			return SkillReadmeMsg{Content: fmt.Sprintf("Local skill: %s\n\n%s", s.Name, s.Description)}
 		}
 	}
-	// GitHub skill — extract owner/repo from URL.
+
 	repoFull := repoFullName(s.URL)
 	if repoFull == "" {
 		return nil
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.previewCancelFn = cancel
+
 	return func() tea.Msg {
-		content, err := skill.FetchReadme(context.Background(), repoFull, 10240)
+		content, err := skill.FetchReadme(ctx, repoFull, 10240)
 		return SkillReadmeMsg{Content: content, Err: err}
 	}
 }
 
 // repoFullName extracts "owner/repo" from a GitHub URL.
-func repoFullName(url string) string {
-	url = strings.TrimRight(url, "/")
-	parts := strings.Split(url, "/")
+func repoFullName(u string) string {
+	u = strings.TrimRight(u, "/")
+	u = strings.TrimSuffix(u, ".git")
+	parts := strings.Split(u, "/")
 	if len(parts) < 2 {
 		return ""
 	}
