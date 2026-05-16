@@ -24,6 +24,7 @@ type KeyMap struct {
 	Refresh key.Binding // "r"
 	Fork    key.Binding // "f"
 	Sort    key.Binding // "s"
+	Open    key.Binding // "o" → open in browser
 	Search  key.Binding // "/" → focus search input
 	Escape  key.Binding // "esc" → unfocus search input
 	Help    key.Binding // "?"
@@ -92,6 +93,10 @@ func DefaultKeyMap() KeyMap {
 		Sort: key.NewBinding(
 			key.WithKeys("s"),
 			key.WithHelp("s", "sort"),
+		),
+		Open: key.NewBinding(
+			key.WithKeys("o"),
+			key.WithHelp("o", "open in browser"),
 		),
 		Search: key.NewBinding(
 			key.WithKeys("/"),

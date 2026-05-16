@@ -133,7 +133,7 @@ func TestClampInt_EqualMinMax(t *testing.T) {
 func TestRenderSearchBar_NoRightLabel(t *testing.T) {
 	ti := textinput.New()
 	ti.Placeholder = "Search..."
-	result := RenderSearchBar(ti, 80, "")
+	result := RenderSearchBar(ti, 80, "", false)
 	if result == "" {
 		t.Error("RenderSearchBar should not return empty string")
 	}
@@ -142,7 +142,7 @@ func TestRenderSearchBar_NoRightLabel(t *testing.T) {
 func TestRenderSearchBar_WithRightLabel(t *testing.T) {
 	ti := textinput.New()
 	ti.Placeholder = "Search..."
-	result := RenderSearchBar(ti, 80, "Sort: ⭐ Stars")
+	result := RenderSearchBar(ti, 80, "Sort: ⭐ Stars", false)
 	if result == "" {
 		t.Error("RenderSearchBar with rightLabel should not return empty string")
 	}
@@ -154,7 +154,7 @@ func TestRenderSearchBar_WithRightLabel(t *testing.T) {
 func TestRenderSearchBar_NarrowWidth(t *testing.T) {
 	ti := textinput.New()
 	// Width=2 is below the minimum (4), should return empty string.
-	result := RenderSearchBar(ti, 2, "")
+	result := RenderSearchBar(ti, 2, "", false)
 	if result != "" {
 		t.Errorf("RenderSearchBar with width=2 should return empty, got %q", result)
 	}
@@ -162,9 +162,22 @@ func TestRenderSearchBar_NarrowWidth(t *testing.T) {
 
 func TestRenderSearchBar_ZeroWidth(t *testing.T) {
 	ti := textinput.New()
-	result := RenderSearchBar(ti, 0, "")
+	result := RenderSearchBar(ti, 0, "", false)
 	if result != "" {
 		t.Errorf("RenderSearchBar with width=0 should return empty, got %q", result)
+	}
+}
+
+func TestRenderSearchBar_FocusedAddsBottomBorder(t *testing.T) {
+	ti := textinput.New()
+	ti.Placeholder = "Search..."
+	unfocused := RenderSearchBar(ti, 80, "", false)
+	focused := RenderSearchBar(ti, 80, "", true)
+	// Focused bar includes a bottom border line so its rendered height is larger.
+	unfocusedLines := strings.Count(unfocused, "\n")
+	focusedLines := strings.Count(focused, "\n")
+	if focusedLines <= unfocusedLines {
+		t.Errorf("focused search bar should have more lines than unfocused (focused=%d, unfocused=%d)", focusedLines, unfocusedLines)
 	}
 }
 

@@ -238,7 +238,7 @@ func (s SessionsTab) View() string {
 	const gapHeight = 1
 	listHeight := max(1, s.height-searchHeight-gapHeight-hintHeight)
 
-	searchBar := RenderSearchBar(s.searchInput, s.width, "")
+	searchBar := RenderSearchBar(s.searchInput, s.width, "", s.searchInput.Focused())
 	leftW, rightW, showPreview := SplitLayout(s.width, 40)
 
 	var splitView string

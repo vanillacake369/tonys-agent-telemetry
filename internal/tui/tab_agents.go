@@ -282,7 +282,7 @@ func (t AgentsTab) View() string {
 	listHeight := max(1, t.height-searchHeight-gapHeight-hintHeight)
 
 	t.searchInput.Width = max(1, t.width-6)
-	searchBar := RenderSearchBar(t.searchInput, t.width, "")
+	searchBar := RenderSearchBar(t.searchInput, t.width, "", t.searchInput.Focused())
 
 	leftW, rightW, showPreview := SplitLayout(t.width, 50)
 

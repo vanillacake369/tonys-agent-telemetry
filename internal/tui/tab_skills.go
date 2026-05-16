@@ -220,6 +220,15 @@ func (t SkillsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 			}
 			return t, nil
 
+		case key.Matches(msg, t.keys.Open):
+			if len(t.filtered) > 0 && t.cursor < len(t.filtered) {
+				s := t.filtered[t.cursor]
+				if s.URL != "" {
+					_ = platform.OpenInBrowser(s.URL)
+				}
+			}
+			return t, nil
+
 		case key.Matches(msg, t.keys.Copy):
 			if len(t.filtered) > 0 && t.cursor < len(t.filtered) {
 				_ = platform.CopyToClipboard(t.filtered[t.cursor].URL)
@@ -441,7 +450,7 @@ func (t SkillsTab) View() string {
 	listHeight := max(1, t.height-searchHeight-gapHeight-hintHeight)
 
 	sortLabel := fmt.Sprintf("Sort: %s %s", sortByIcon(t.sortBy), sortByLabel(t.sortBy))
-	searchBar := RenderSearchBar(t.searchInput, t.width, sortLabel)
+	searchBar := RenderSearchBar(t.searchInput, t.width, sortLabel, t.searchInput.Focused())
 
 	leftW, rightW, showPreview := SplitLayout(t.width, 45)
 
@@ -456,7 +465,7 @@ func (t SkillsTab) View() string {
 		leftContent := t.renderSkillList(max(1, leftW-2), max(1, listHeight-2))
 		splitView = RenderPanel("Skills", leftContent, leftW, listHeight, true)
 	}
-	hintBar := RenderHintBar("↵:analyze  s:sort  y:copy  r:refresh", t.width)
+	hintBar := RenderHintBar("↵:analyze  o:open  s:sort  y:copy  r:refresh", t.width)
 
 	return strings.Join([]string{searchBar, "", splitView, hintBar}, "\n")
 }
@@ -503,6 +512,15 @@ func formatSkillLine(s skill.Skill, maxWidth int) string {
 	case skill.SourceLocal:
 		icon = "📁"
 		meta = "local"
+	case skill.SourceGitHub:
+		icon = "📦"
+		meta = fmt.Sprintf("⭐%d", s.Stars)
+	case skill.SourceNPM:
+		icon = "📦"
+		meta = fmt.Sprintf("npm %d", s.Stars)
+	case skill.SourceAwesome:
+		icon = "📋"
+		meta = "awesome"
 	default:
 		icon = "📦"
 		meta = fmt.Sprintf("⭐%d", s.Stars)

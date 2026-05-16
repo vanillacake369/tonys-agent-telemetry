@@ -230,7 +230,14 @@ func (a App) View() string {
 	statusBar := a.renderStatusBar(innerW)
 
 	inner := strings.Join([]string{tabBar, content, statusBar}, "\n")
-	full := OuterBorderStyle.
+
+	// Switch outer border color based on mode: primary (bright) in SEARCH mode.
+	outerStyle := OuterBorderStyle
+	if a.searchFocused {
+		outerStyle = outerStyle.BorderForeground(colorPrimary)
+	}
+
+	full := outerStyle.
 		Width(innerW).
 		Render(inner)
 
@@ -280,7 +287,7 @@ func (a App) tabHints() string {
 	case TabDAG:
 		return "◄►:switch  ↑↓:scroll"
 	case TabSkills:
-		return "↵:analyze  s:sort  y:copy  r:refresh"
+		return "↵:analyze  o:open  s:sort  y:copy  r:refresh"
 	}
 	return ""
 }
@@ -321,16 +328,26 @@ func (a App) renderStatusBar(width int) string {
 	var help string
 
 	if a.searchFocused {
-		// Search mode indicator.
-		help = " SEARCH │ type to filter │ esc:back"
+		// Search mode: bold label with background + hints.
+		modeStyle := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#1A1A2E")).
+			Background(colorPrimary).
+			Padding(0, 1)
+		mode := modeStyle.Render("SEARCH")
+		help = mode + " type to filter │ esc:back"
 	} else {
-		// Normal mode: show tab switching hints and context-specific hints.
-		globalHints := "NORMAL │ 1:sessions 2:agents 3:dag 4:skills"
+		// Normal mode: dim label + tab switching hints and context-specific hints.
+		modeStyle := lipgloss.NewStyle().
+			Foreground(colorDim).
+			Padding(0, 1)
+		mode := modeStyle.Render("NORMAL")
+		tabHints := "1:sessions 2:agents 3:dag 4:skills"
 		tabSpecific := a.tabHints()
 		quitHint := "/:search  ?:help  q:quit"
 
 		var parts []string
-		parts = append(parts, globalHints)
+		parts = append(parts, mode+" │ "+tabHints)
 		if tabSpecific != "" {
 			parts = append(parts, tabSpecific)
 		}

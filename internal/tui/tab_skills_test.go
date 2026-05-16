@@ -364,7 +364,7 @@ func TestSkillsTab_View_ContainsHints(t *testing.T) {
 	s = s.SetSize(120, 30).(SkillsTab)
 
 	view := s.View()
-	for _, hint := range []string{"↵:analyze", "s:sort", "y:copy", "r:refresh"} {
+	for _, hint := range []string{"↵:analyze", "o:open", "s:sort", "y:copy", "r:refresh"} {
 		if !strings.Contains(view, hint) {
 			t.Errorf("View() missing hint %q", hint)
 		}
@@ -448,6 +448,63 @@ func TestBuildClaudeAnalysisCmd_Format(t *testing.T) {
 		t.Errorf("command missing readme: %q", cmd)
 	}
 	_ = fmt.Sprintf("cmd length: %d", len(cmd))
+}
+
+func TestSkillsTab_Open_WithURLSkill_DoesNotPanic(t *testing.T) {
+	s := NewSkillsTab()
+	skills := []skill.Skill{
+		{
+			Name:   "k8s-skill",
+			Source: skill.SourceGitHub,
+			URL:    "https://github.com/alice/k8s-skill",
+			Stars:  234,
+		},
+	}
+	s, _ = updateSkillsTab(t, s, LocalSkillsLoadedMsg{Skills: skills, Err: nil})
+
+	// Pressing "o" should attempt to open the browser without panicking.
+	// The command may fail if xdg-open/open is not installed in CI, but Update itself must not panic.
+	s2, cmd := updateSkillsTab(t, s, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	_ = s2
+	// cmd is nil because OpenInBrowser is called synchronously and no tea.Cmd is returned.
+	if cmd != nil {
+		// cmd is allowed to be non-nil; just execute it safely.
+		_ = cmd()
+	}
+}
+
+func TestSkillsTab_Open_WithNoURL_DoesNotPanic(t *testing.T) {
+	s := NewSkillsTab()
+	skills := []skill.Skill{
+		{
+			Name:   "scaffold",
+			Source: skill.SourceLocal,
+			URL:    "", // no URL
+		},
+	}
+	s, _ = updateSkillsTab(t, s, LocalSkillsLoadedMsg{Skills: skills, Err: nil})
+
+	// Pressing "o" with no URL should be a no-op and not panic.
+	_, cmd := updateSkillsTab(t, s, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	_ = cmd
+}
+
+func TestSkillsTab_Open_EmptyList_DoesNotPanic(t *testing.T) {
+	s := NewSkillsTab()
+	// No skills loaded — "o" should be a no-op.
+	_, cmd := updateSkillsTab(t, s, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	_ = cmd
+}
+
+func TestSkillsTab_View_ContainsOpenHint(t *testing.T) {
+	s := NewSkillsTab()
+	s, _ = updateSkillsTab(t, s, LocalSkillsLoadedMsg{Skills: makeTestSkillsList(), Err: nil})
+	s = s.SetSize(120, 30).(SkillsTab)
+
+	view := s.View()
+	if !strings.Contains(view, "o:open") {
+		t.Errorf("View() missing hint 'o:open': %s", view)
+	}
 }
 
 func TestNextSortBy_Cycles(t *testing.T) {

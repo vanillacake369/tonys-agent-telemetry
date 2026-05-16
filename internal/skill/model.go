@@ -6,8 +6,10 @@ import "time"
 type Source string
 
 const (
-	SourceLocal  Source = "local"
-	SourceGitHub Source = "github"
+	SourceLocal   Source = "local"
+	SourceGitHub  Source = "github"
+	SourceNPM     Source = "npm"
+	SourceAwesome Source = "awesome"
 )
 
 // Skill represents a Claude Code skill from any source.

@@ -45,18 +45,26 @@ func ClampInt(val, minVal, maxVal int) int {
 // RenderSearchBar renders a consistent search input bar used across tabs.
 // rightLabel is an optional string shown right-aligned (e.g. "Sort: ⭐ Stars").
 // When rightLabel is empty, the input fills the full width.
-func RenderSearchBar(input textinput.Model, width int, rightLabel string) string {
+// When focused is true, a primary-color bottom border is drawn to signal active search mode.
+func RenderSearchBar(input textinput.Model, width int, rightLabel string, focused bool) string {
 	if width < 4 {
 		return ""
 	}
 
 	inputView := input.View()
 
+	baseStyle := lipgloss.NewStyle().
+		Foreground(colorText).
+		Width(max(0, width))
+	if focused {
+		baseStyle = baseStyle.
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderBottom(true).
+			BorderForeground(colorPrimary)
+	}
+
 	if rightLabel == "" {
-		return lipgloss.NewStyle().
-			Foreground(colorText).
-			Width(max(0, width)).
-			Render(" " + inputView)
+		return baseStyle.Render(" " + inputView)
 	}
 
 	sortStyle := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
@@ -71,9 +79,7 @@ func RenderSearchBar(input textinput.Model, width int, rightLabel string) string
 		lipgloss.NewStyle().Width(sortWidth).Align(lipgloss.Right).Render(sortRendered),
 	)
 
-	return lipgloss.NewStyle().
-		Width(max(0, width)).
-		Render(row)
+	return baseStyle.Width(max(0, width)).Render(row)
 }
 
 // RenderSplitView renders left and right panels side by side separated by a

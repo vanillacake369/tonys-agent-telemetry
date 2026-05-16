@@ -247,6 +247,46 @@ func TestApp_ViewStatusBarSearchMode(t *testing.T) {
 	}
 }
 
+func TestApp_ViewNormalMode_SearchFocusedFalse(t *testing.T) {
+	a := NewApp()
+	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 120, Height: 24})
+	if a.searchFocused {
+		t.Fatal("searchFocused should be false in normal mode")
+	}
+	// View() should not panic and should contain NORMAL.
+	view := a.View()
+	if !strings.Contains(view, "NORMAL") {
+		t.Errorf("View() in normal mode should contain 'NORMAL'")
+	}
+}
+
+func TestApp_ViewSearchMode_SearchFocusedTrue(t *testing.T) {
+	a := NewApp()
+	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 120, Height: 24})
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	if !a.searchFocused {
+		t.Fatal("searchFocused should be true after '/'")
+	}
+	// View() should not panic and should contain SEARCH.
+	view := a.View()
+	if !strings.Contains(view, "SEARCH") {
+		t.Errorf("View() in search mode should contain 'SEARCH'")
+	}
+	// NORMAL should not appear in the status bar when in search mode.
+	if strings.Contains(view, "NORMAL") {
+		t.Errorf("View() in search mode should not contain 'NORMAL'")
+	}
+}
+
+func TestApp_SkillsTabHints_ContainsOpen(t *testing.T) {
+	a := NewApp()
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	hints := a.tabHints()
+	if !strings.Contains(hints, "o:open") {
+		t.Errorf("skills tab hints should contain 'o:open', got %q", hints)
+	}
+}
+
 func TestApp_InitReturnsCmd(t *testing.T) {
 	a := NewApp()
 	// Init should not panic and may return nil.

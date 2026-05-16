@@ -162,3 +162,79 @@ func TestRepoFullNameFromURL(t *testing.T) {
 		}
 	}
 }
+
+// TestGHCodeSearchResult_ParsesJSON verifies that the JSON shape returned by
+// `gh search code --json repository,path` is correctly mapped to ghCodeSearchResult.
+func TestGHCodeSearchResult_ParsesJSON(t *testing.T) {
+	raw := []byte(`[
+		{
+			"repository": {
+				"fullName": "alice/skill-repo",
+				"name": "skill-repo",
+				"description": "A skill repository",
+				"isPrivate": false
+			},
+			"path": "skills/deploy/SKILL.md"
+		},
+		{
+			"repository": {
+				"fullName": "bob/another-skill",
+				"name": "another-skill",
+				"description": "Another skill",
+				"isPrivate": false
+			},
+			"path": "SKILL.md"
+		}
+	]`)
+
+	var results []ghCodeSearchResult
+	if err := json.Unmarshal(raw, &results); err != nil {
+		t.Fatalf("json.Unmarshal code search results: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("got %d results, want 2", len(results))
+	}
+	if results[0].Repository.FullName != "alice/skill-repo" {
+		t.Errorf("FullName = %q, want %q", results[0].Repository.FullName, "alice/skill-repo")
+	}
+	if results[0].Path != "skills/deploy/SKILL.md" {
+		t.Errorf("Path = %q, want %q", results[0].Path, "skills/deploy/SKILL.md")
+	}
+	if results[1].Repository.Name != "another-skill" {
+		t.Errorf("Name = %q, want %q", results[1].Repository.Name, "another-skill")
+	}
+}
+
+// TestDeduplicateCodeResults verifies that repos with the same fullName appear only once.
+func TestDeduplicateCodeResults(t *testing.T) {
+	results := []ghCodeSearchResult{
+		{Repository: ghCodeRepo{FullName: "alice/skill-repo", Name: "skill-repo"}, Path: "a/SKILL.md"},
+		{Repository: ghCodeRepo{FullName: "alice/skill-repo", Name: "skill-repo"}, Path: "b/SKILL.md"},
+		{Repository: ghCodeRepo{FullName: "bob/other-skill", Name: "other-skill"}, Path: "SKILL.md"},
+	}
+
+	unique := deduplicateCodeResults(results)
+	if len(unique) != 2 {
+		t.Fatalf("got %d unique repos, want 2", len(unique))
+	}
+}
+
+// TestSearchGitHubRepos_UsesRefinedQuery verifies that searchGitHubRepos prepends
+// "claude code skill" to the user query. This is tested via JSON parsing only
+// (no actual gh call), so it verifies the query-building logic by examining
+// the args that would be passed.
+func TestSearchGitHubRepos_BuildsRefinedQuery(t *testing.T) {
+	// Verify that buildRefinedRepoQuery adds the prefix.
+	got := buildRefinedRepoQuery("kubernetes")
+	want := "claude code skill kubernetes"
+	if got != want {
+		t.Errorf("buildRefinedRepoQuery = %q, want %q", got, want)
+	}
+
+	// Empty query — prefix only.
+	got2 := buildRefinedRepoQuery("")
+	want2 := "claude code skill"
+	if got2 != want2 {
+		t.Errorf("buildRefinedRepoQuery(%q) = %q, want %q", "", got2, want2)
+	}
+}
