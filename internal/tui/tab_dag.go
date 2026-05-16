@@ -163,14 +163,14 @@ func (d DAGTab) SetSize(width, height int) TabModel {
 	d.width = width
 	d.height = height
 
-	headerHeight := 2  // session header + hint line
-	footerHeight := 2  // separator + status line
-	vpHeight := height - headerHeight - footerHeight
-	if vpHeight < 1 {
-		vpHeight = 1
-	}
+	// Header: 2 lines (session label row + blank separation)
+	// Stats : 2 lines (separator + summary)
+	// Viewport fills the rest.
+	headerHeight := 2
+	statsHeight := 2
+	vpHeight := max(1, height-headerHeight-statsHeight)
 
-	d.viewport.Width = width
+	d.viewport.Width = max(1, width)
 	d.viewport.Height = vpHeight
 
 	// Refresh content with new width if DAG is available.
@@ -185,40 +185,34 @@ func (d DAGTab) SetSize(width, height int) TabModel {
 func (d DAGTab) View() string {
 	if d.loading {
 		return lipgloss.NewStyle().
-			Foreground(dimColor).
+			Foreground(colorDim).
 			Italic(true).
 			Render("Loading sessions...")
 	}
 
 	if d.err != nil && d.dag == nil {
 		return lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Light: "#CC0000", Dark: "#FF6B6B"}).
+			Foreground(colorError).
 			Render(fmt.Sprintf("Error: %s", d.err))
 	}
 
 	if len(d.sessions) == 0 {
 		return lipgloss.NewStyle().
-			Foreground(dimColor).
+			Foreground(colorDim).
 			Italic(true).
 			Render("No sessions found")
 	}
 
 	header := d.renderHeader()
 	content := d.viewport.View()
-	footer := d.renderFooter()
+	stats := d.renderStats()
 
-	return strings.Join([]string{header, content, footer}, "\n")
+	// header = 2 lines, stats = 2 lines (matching SetSize accounting)
+	return strings.Join([]string{header, "", content, "", stats}, "\n")
 }
 
-// renderHeader renders the session selector bar.
+// renderHeader renders the session selector bar — dim text, no border.
 func (d DAGTab) renderHeader() string {
-	headerStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderBottom(true).
-		BorderForeground(borderColor).
-		Width(d.width - 2).
-		Padding(0, 1)
-
 	var sessionLabel string
 	if len(d.sessions) > 0 && d.selectedIdx < len(d.sessions) {
 		sess := d.sessions[d.selectedIdx]
@@ -232,19 +226,15 @@ func (d DAGTab) renderHeader() string {
 		sessionLabel = "No session selected"
 	}
 
-	hint := lipgloss.NewStyle().Foreground(dimColor).Render(" ◄ ► to switch sessions")
-	return headerStyle.Render(sessionLabel + hint)
+	hint := lipgloss.NewStyle().Foreground(colorDim).Render("  ◄ ► to switch sessions")
+	label := lipgloss.NewStyle().Foreground(colorText).Render(sessionLabel)
+
+	line := label + hint
+	return lipgloss.NewStyle().Width(max(0, d.width)).Render(line)
 }
 
-// renderFooter renders the summary status bar.
-func (d DAGTab) renderFooter() string {
-	footerStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderTop(true).
-		BorderForeground(borderColor).
-		Width(d.width - 2).
-		Padding(0, 1)
-
+// renderStats renders a single summary line below the viewport.
+func (d DAGTab) renderStats() string {
 	var parts []string
 
 	if d.dag != nil {
@@ -254,14 +244,16 @@ func (d DAGTab) renderFooter() string {
 		}
 		totalTokens := sumDAGTokens(d.dag)
 		parts = append(parts,
-			fmt.Sprintf("Total: %d agents", agentCount),
+			fmt.Sprintf("%d agents", agentCount),
 			dagFormatTokens(totalTokens)+" tokens",
 		)
 	}
 
-	parts = append(parts, "◄►:switch  ↑↓/j/k:scroll")
-
-	return footerStyle.Render(strings.Join(parts, " │ "))
+	text := strings.Join(parts, "  │  ")
+	return lipgloss.NewStyle().
+		Foreground(colorDim).
+		Width(max(0, d.width)).
+		Render(text)
 }
 
 // countDAGNodes counts all nodes in the DAG tree (including root).

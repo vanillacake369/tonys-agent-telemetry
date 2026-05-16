@@ -150,10 +150,10 @@ func (a App) View() string {
 
 	tabBar := renderTabBar(a.activeTab, a.width)
 	content := ContentStyle.
-		Width(a.width - ContentStyle.GetHorizontalPadding()).
+		Width(a.width).
 		Height(a.contentHeight()).
 		Render(a.tabs[a.activeTab].View())
-	statusBar := renderStatusBar(a.width)
+	statusBar := a.renderStatusBar(a.width)
 
 	return strings.Join([]string{tabBar, content, statusBar}, "\n")
 }
@@ -169,12 +169,27 @@ func (a App) contentHeight() int {
 
 // propagateSize distributes the current terminal dimensions to every tab model.
 func (a App) propagateSize() App {
-	cw := a.width - ContentStyle.GetHorizontalPadding()
+	cw := a.width
 	ch := a.contentHeight()
 	for tab, m := range a.tabs {
 		a.tabs[tab] = m.SetSize(cw, ch)
 	}
 	return a
+}
+
+// tabHints returns the context-sensitive hint string for the active tab.
+func (a App) tabHints() string {
+	switch a.activeTab {
+	case TabSessions:
+		return "Enter:resume  ^F:fork  ^Y:copy  ^R:refresh"
+	case TabAgents:
+		return "Enter:launch  ^Y:copy  ^R:refresh"
+	case TabDAG:
+		return "◄►:switch  ↑↓:scroll"
+	case TabSkills:
+		return "Enter:analyze  ^T:sort  ^Y:copy  ^R:refresh"
+	}
+	return ""
 }
 
 // renderTabBar returns the tab bar string for the given active tab and total width.
@@ -197,11 +212,22 @@ func renderTabBar(active Tab, width int) string {
 	return TabBarStyle.Width(width).Render(bar)
 }
 
-// renderStatusBar returns the status bar string with global key hints.
-func renderStatusBar(width int) string {
-	help := "^S:sessions  ^A:agents  ^D:dag  ^K:skills  q:quit"
+// renderStatusBar returns a merged status bar showing both global and tab hints.
+func (a App) renderStatusBar(width int) string {
+	globalHints := "^S:sessions  ^A:agents  ^D:dag  ^K:skills"
+	tabSpecific := a.tabHints()
+	quitHint := "q:quit"
+
+	var parts []string
+	parts = append(parts, globalHints)
+	if tabSpecific != "" {
+		parts = append(parts, tabSpecific)
+	}
+	parts = append(parts, quitHint)
+
+	help := strings.Join(parts, "  │  ")
+	innerWidth := max(0, width-StatusBarStyle.GetHorizontalPadding())
 	return StatusBarStyle.Width(width).Render(
-		lipgloss.PlaceHorizontal(width-StatusBarStyle.GetHorizontalPadding(), lipgloss.Left, help),
+		lipgloss.PlaceHorizontal(innerWidth, lipgloss.Left, help),
 	)
 }
-

@@ -3,49 +3,66 @@ package tui
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	// primaryColor is the accent color used for active elements.
-	primaryColor = lipgloss.AdaptiveColor{Light: "#5C4AE4", Dark: "#7B6CF6"}
+	// colorPrimary is the accent color used for active elements.
+	colorPrimary = lipgloss.AdaptiveColor{Light: "#5A4FCF", Dark: "#8B7CF6"}
 
-	// dimColor is used for inactive/secondary elements.
-	dimColor = lipgloss.AdaptiveColor{Light: "#9B9B9B", Dark: "#555555"}
+	// colorDim is used for inactive/secondary elements.
+	colorDim = lipgloss.AdaptiveColor{Light: "#999999", Dark: "#555555"}
 
-	// borderColor is used for separators and borders.
-	borderColor = lipgloss.AdaptiveColor{Light: "#D9D9D9", Dark: "#383838"}
+	// colorBorder is used for separators and borders.
+	colorBorder = lipgloss.AdaptiveColor{Light: "#E0E0E0", Dark: "#333333"}
 
-	// statusBgColor is the background for the status bar.
-	statusBgColor = lipgloss.AdaptiveColor{Light: "#EFEFEF", Dark: "#1A1A2E"}
+	// colorBg is the background for the status bar.
+	colorBg = lipgloss.AdaptiveColor{Light: "#F5F5F5", Dark: "#1A1A2E"}
+
+	// colorSuccess is used for successful status indicators.
+	colorSuccess = lipgloss.AdaptiveColor{Light: "#2D8A2D", Dark: "#4CAF50"}
+
+	// colorWarning is used for warning status indicators.
+	colorWarning = lipgloss.AdaptiveColor{Light: "#B8860B", Dark: "#FFC107"}
+
+	// colorError is used for error status indicators.
+	colorError = lipgloss.AdaptiveColor{Light: "#CC0000", Dark: "#FF5555"}
+
+	// colorText is the default text color.
+	colorText = lipgloss.AdaptiveColor{Light: "#333333", Dark: "#E0E0E0"}
+
+	// Keep legacy aliases so other files that still reference them compile.
+	primaryColor  = colorPrimary
+	dimColor      = colorDim
+	borderColor   = colorBorder
+	statusBgColor = colorBg
 
 	// ActiveTabStyle renders the currently selected tab label.
+	// No border — just bold+underline text.
 	ActiveTabStyle = lipgloss.NewStyle().
 			Bold(true).
 			Underline(true).
-			Foreground(primaryColor).
+			Foreground(colorPrimary).
 			Padding(0, 1)
 
 	// InactiveTabStyle renders unselected tab labels.
 	InactiveTabStyle = lipgloss.NewStyle().
-				Foreground(dimColor).
+				Foreground(colorDim).
 				Padding(0, 1)
 
 	// TabBarStyle wraps the entire tab bar row.
-	TabBarStyle = lipgloss.NewStyle().
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderBottom(true).
-			BorderForeground(borderColor)
+	// No border — clean text-only row.
+	TabBarStyle = lipgloss.NewStyle()
 
-	// ContentStyle wraps the main content area between the tab bar and status bar.
-	ContentStyle = lipgloss.NewStyle().
-			Padding(0, 1)
+	// ContentStyle wraps the main content area.
+	// No padding — tabs fill the entire allocated space.
+	ContentStyle = lipgloss.NewStyle()
 
 	// StatusBarStyle renders the bottom help/status row.
 	StatusBarStyle = lipgloss.NewStyle().
-			Background(statusBgColor).
-			Foreground(dimColor).
+			Background(colorBg).
+			Foreground(colorDim).
 			Padding(0, 1)
 
 	// TabSeparatorStyle renders the vertical separator between tab labels.
 	TabSeparatorStyle = lipgloss.NewStyle().
-				Foreground(dimColor)
+				Foreground(colorDim)
 )
 
 // tabSeparator is the character placed between tab labels.

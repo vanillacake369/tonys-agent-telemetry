@@ -254,80 +254,50 @@ func (t AgentsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 // View renders the agents tab as a split layout.
 func (t AgentsTab) View() string {
 	if t.width == 0 || t.height == 0 {
-		return "Agents\nLoading..."
+		if t.loading {
+			return lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render("loading agents...")
+		}
+		return "Agents\n" + t.renderList(40, 10)
 	}
 
-	// Heights
-	searchBarHeight := 3 // border + content + border
-	hintBarHeight := 1
-	listHeight := t.height - searchBarHeight - hintBarHeight
-	if listHeight < 1 {
-		listHeight = 1
+	// Layout:
+	//   search bar : 1 line
+	//   gap        : 1 line
+	//   list+preview: remaining height - 1 (hint)
+	//   hint bar   : 1 line
+	const hintHeight = 1
+	const searchHeight = 1
+	const gapHeight = 1
+	listHeight := max(1, t.height-searchHeight-gapHeight-hintHeight)
+
+	t.searchInput.Width = max(1, t.width-6)
+	searchBar := RenderSearchBar(t.searchInput, t.width, "")
+
+	leftW, rightW, showPreview := SplitLayout(t.width, 50)
+
+	left := t.renderList(max(1, leftW-2), listHeight)
+	right := ""
+	if showPreview {
+		right = t.renderPreview(max(1, rightW-2), listHeight)
 	}
 
-	// Widths: split 50/50
-	halfWidth := t.width / 2
-	leftWidth := halfWidth
-	rightWidth := t.width - halfWidth
+	splitView := RenderSplitView(left, right, leftW, rightW, listHeight, showPreview)
+	hintBar := RenderHintBar("Enter:launch  ^Y:copy  ^R:refresh  ↑/↓ or j/k:navigate", t.width)
 
-	// ── Search bar ──────────────────────────────────────────────────────────
-	searchStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(borderColor).
-		Width(t.width - 2).
-		Padding(0, 1)
-
-	t.searchInput.Width = t.width - 6
-	searchView := searchStyle.Render(t.searchInput.View())
-
-	// ── Agent list (left pane) ───────────────────────────────────────────────
-	listStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(borderColor).
-		Width(leftWidth - 2).
-		Height(listHeight - 2)
-
-	listContent := t.renderList(leftWidth-4, listHeight-2)
-	leftPane := listStyle.Render(listContent)
-
-	// ── Preview (right pane) ─────────────────────────────────────────────────
-	previewStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(borderColor).
-		Width(rightWidth - 2).
-		Height(listHeight - 2)
-
-	previewContent := t.renderPreview(rightWidth-4, listHeight-2)
-	rightPane := previewStyle.Render(previewContent)
-
-	// ── Hint bar ─────────────────────────────────────────────────────────────
-	hintStyle := lipgloss.NewStyle().
-		Foreground(dimColor)
-	hint := hintStyle.Render("Enter:launch  ^Y:copy  ^R:refresh  ↑/↓ or j/k:navigate")
-
-	// ── Assemble ─────────────────────────────────────────────────────────────
-	splitRow := lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
-	return strings.Join([]string{searchView, splitRow, hint}, "\n")
+	return strings.Join([]string{searchBar, "", splitView, hintBar}, "\n")
 }
 
 // renderList returns the agent list lines truncated to fit within the pane.
 func (t AgentsTab) renderList(width, height int) string {
 	if t.loading {
-		return lipgloss.NewStyle().Foreground(dimColor).Italic(true).Render("loading agents...")
+		return lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render("loading agents...")
 	}
 	if t.err != nil && len(t.filtered) == 0 {
-		return lipgloss.NewStyle().Foreground(dimColor).Italic(true).Render("no agents found")
+		return lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render("no agents found")
 	}
 	if len(t.filtered) == 0 {
-		return lipgloss.NewStyle().Foreground(dimColor).Italic(true).Render("no results")
+		return lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render("no results")
 	}
-
-	selectedStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(primaryColor)
-	normalStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.AdaptiveColor{Light: "#333333", Dark: "#CCCCCC"})
-	dimStyle := lipgloss.NewStyle().Foreground(dimColor)
 
 	// Scroll window: centre cursor in the visible region.
 	start := t.cursor - height/2
@@ -360,25 +330,14 @@ func (t AgentsTab) renderList(width, height int) string {
 			desc = desc[:27] + "..."
 		}
 
-		var line string
-		if a.Type != "" {
-			line = fmt.Sprintf("%s  %-20s │ %-8s │ %s", icon, a.Name, model, desc)
-		} else {
-			line = fmt.Sprintf("%s  %-20s │ %-8s │ %s", icon, a.Name, model, desc)
-		}
+		line := fmt.Sprintf("%s  %-20s │ %-8s │ %s", icon, a.Name, model, desc)
 
 		// Truncate to fit width.
 		if len(line) > width {
 			line = line[:width]
 		}
 
-		if i == t.cursor {
-			prefix := dimStyle.Render("> ")
-			lines = append(lines, prefix+selectedStyle.Render(line))
-		} else {
-			prefix := "  "
-			lines = append(lines, prefix+normalStyle.Render(line))
-		}
+		lines = append(lines, RenderListItem(line, i == t.cursor, width+2))
 	}
 
 	return strings.Join(lines, "\n")
@@ -386,25 +345,22 @@ func (t AgentsTab) renderList(width, height int) string {
 
 // renderPreview returns the preview pane content for the selected agent.
 func (t AgentsTab) renderPreview(width, height int) string {
-	_ = width
-	_ = height
-
 	if t.loading {
-		return lipgloss.NewStyle().Foreground(dimColor).Italic(true).Render("loading...")
+		return lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render("loading...")
 	}
 	if len(t.filtered) == 0 {
-		return lipgloss.NewStyle().Foreground(dimColor).Italic(true).Render("select an agent")
+		return lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render("select an agent")
 	}
 	if t.preview == "" {
-		return lipgloss.NewStyle().Foreground(dimColor).Italic(true).Render("no preview available")
+		return lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render("no preview available")
 	}
-	return t.preview
+	return wrapLines(t.preview, width, height)
 }
 
 // SetSize stores the new terminal dimensions.
 func (t AgentsTab) SetSize(width, height int) TabModel {
 	t.width = width
 	t.height = height
-	t.searchInput.Width = width - 6
+	t.searchInput.Width = max(1, width-6)
 	return t
 }

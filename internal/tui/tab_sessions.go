@@ -195,82 +195,56 @@ func (s SessionsTab) loadPreviewCmd() tea.Cmd {
 func (s SessionsTab) SetSize(width, height int) TabModel {
 	s.width = width
 	s.height = height
-	s.searchInput.Width = width - 4
+	s.searchInput.Width = max(1, width-4)
 	return s
 }
 
 // View renders the sessions tab.
 func (s SessionsTab) View() string {
+	if s.width == 0 || s.height == 0 {
+		if s.loading {
+			return lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render("Loading sessions...")
+		}
+		return "Sessions"
+	}
+
 	if s.loading {
-		return lipgloss.NewStyle().
-			Foreground(dimColor).
-			Italic(true).
-			Render("Loading sessions...")
+		return RenderLoadingState(s.width, s.height)
 	}
 
 	if s.err != nil {
-		return lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Light: "#CC0000", Dark: "#FF6B6B"}).
-			Render(fmt.Sprintf("Error: %s", s.err))
+		return renderErrorState(s.err, s.width)
 	}
 
-	// Calculate available heights.
-	// search bar: 1 line + 1 border = 2
-	// status bar: 1 line + 1 border = 2
-	// content: remaining
-	searchBarHeight := 3
-	statusBarHeight := 2
-	listHeight := s.height - searchBarHeight - statusBarHeight
-	if listHeight < 1 {
-		listHeight = 1
+	// Layout:
+	//   search bar : 1 line
+	//   gap        : 1 line
+	//   list+preview: remaining height - 1 (hint line at bottom)
+	//   hint bar   : 1 line
+	const hintHeight = 1
+	const searchHeight = 1
+	const gapHeight = 1
+	listHeight := max(1, s.height-searchHeight-gapHeight-hintHeight)
+
+	searchBar := RenderSearchBar(s.searchInput, s.width, "")
+	leftW, rightW, showPreview := SplitLayout(s.width, 40)
+
+	left := s.renderSessionList(leftW, listHeight)
+	right := ""
+	if showPreview {
+		right = s.renderPreview(rightW, listHeight)
 	}
 
-	searchBar := s.renderSearchBar()
-	mainContent := s.renderMainContent(listHeight)
-	statusBar := s.renderSessionStatusBar()
+	splitView := RenderSplitView(left, right, leftW, rightW, listHeight, showPreview)
+	hintBar := RenderHintBar("Enter:resume  ^F:fork  ^Y:copy  ^R:refresh", s.width)
 
-	return strings.Join([]string{searchBar, mainContent, statusBar}, "\n")
-}
-
-// renderSearchBar renders the search input area.
-func (s SessionsTab) renderSearchBar() string {
-	searchStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderBottom(true).
-		BorderForeground(borderColor).
-		Padding(0, 1).
-		Width(s.width - 2)
-
-	return searchStyle.Render(s.searchInput.View())
-}
-
-// renderMainContent renders the split list/preview area.
-func (s SessionsTab) renderMainContent(height int) string {
-	if s.width == 0 {
-		return s.renderSessionList(40, height)
-	}
-
-	leftWidth := s.width * 40 / 100
-	rightWidth := s.width - leftWidth - 1 // -1 for separator
-
-	left := s.renderSessionList(leftWidth, height)
-	right := s.renderPreview(rightWidth, height)
-
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	return strings.Join([]string{searchBar, "", splitView, hintBar}, "\n")
 }
 
 // renderSessionList renders the left panel with the filtered sessions list.
 func (s SessionsTab) renderSessionList(width, height int) string {
-	listStyle := lipgloss.NewStyle().
-		Width(width).
-		Height(height)
-
 	if len(s.filtered) == 0 {
-		empty := lipgloss.NewStyle().
-			Foreground(dimColor).
-			Italic(true).
-			Render("No sessions found")
-		return listStyle.Render(empty)
+		return RenderEmptyState("No sessions found", width, height)
 	}
 
 	// Determine scroll window so the cursor is always visible.
@@ -282,23 +256,11 @@ func (s SessionsTab) renderSessionList(width, height int) string {
 	var rows []string
 	for i := scrollOffset; i < len(s.filtered) && i < scrollOffset+height; i++ {
 		sess := s.filtered[i]
-		line := s.formatSessionLine(sess, width-2)
-
-		if i == s.cursor {
-			rows = append(rows, lipgloss.NewStyle().
-				Foreground(primaryColor).
-				Bold(true).
-				Width(width).
-				Render("> "+line))
-		} else {
-			rows = append(rows, lipgloss.NewStyle().
-				Foreground(dimColor).
-				Width(width).
-				Render("  "+line))
-		}
+		line := s.formatSessionLine(sess, max(1, width-2))
+		rows = append(rows, RenderListItem(line, i == s.cursor, width))
 	}
 
-	return listStyle.Render(strings.Join(rows, "\n"))
+	return strings.Join(rows, "\n")
 }
 
 // formatSessionLine formats a single session entry for display.
@@ -316,41 +278,18 @@ func (s SessionsTab) formatSessionLine(sess data.Session, maxWidth int) string {
 		remaining = 1
 	}
 
-	prompt := sess.FirstPrompt
-	if len([]rune(prompt)) > remaining {
-		runes := []rune(prompt)
-		prompt = string(runes[:remaining])
-	}
-
+	prompt := truncateToWidth(sess.FirstPrompt, remaining)
 	return prefix + prompt
 }
 
 // renderPreview renders the right panel with the conversation preview.
 func (s SessionsTab) renderPreview(width, height int) string {
-	previewStyle := lipgloss.NewStyle().
-		Width(width).
-		Height(height).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderLeft(true).
-		BorderForeground(borderColor).
-		PaddingLeft(1)
-
 	if len(s.filtered) == 0 {
-		return previewStyle.Render(
-			lipgloss.NewStyle().
-				Foreground(dimColor).
-				Italic(true).
-				Render("No session selected"),
-		)
+		return RenderEmptyState("No session selected", width, height)
 	}
 
 	if len(s.preview) == 0 {
-		return previewStyle.Render(
-			lipgloss.NewStyle().
-				Foreground(dimColor).
-				Italic(true).
-				Render("No preview available"),
-		)
+		return RenderEmptyState("No preview available", width, height)
 	}
 
 	// Render turns.
@@ -360,44 +299,32 @@ func (s SessionsTab) renderPreview(width, height int) string {
 		var roleLabel string
 		switch turn.Role {
 		case "user":
-			roleLabel = roleStyle.Foreground(primaryColor).Render("[User]")
+			roleLabel = roleStyle.Foreground(colorPrimary).Render("[User]")
 		case "assistant":
-			roleLabel = roleStyle.Foreground(dimColor).Render("[Asst]")
+			roleLabel = roleStyle.Foreground(colorDim).Render("[Asst]")
 		default:
 			roleLabel = roleStyle.Render("[" + turn.Role + "]")
 		}
 
 		// Wrap content to fit in width.
-		contentWidth := width - 8 // account for border, padding, role label
-		if contentWidth < 10 {
-			contentWidth = 10
-		}
-		content := turn.Content
-		if len([]rune(content)) > contentWidth {
-			runes := []rune(content)
-			content = string(runes[:contentWidth]) + "..."
-		}
-		// Replace newlines with space for single-line display.
-		content = strings.ReplaceAll(content, "\n", " ")
+		contentWidth := max(10, width-8) // account for role label
+		content := truncateToWidth(
+			strings.ReplaceAll(turn.Content, "\n", " "),
+			contentWidth,
+		)
 
 		lines = append(lines, fmt.Sprintf("%s %s", roleLabel, content))
 	}
 
-	return previewStyle.Render(strings.Join(lines, "\n"))
-}
-
-// renderSessionStatusBar renders the key hint bar at the bottom.
-func (s SessionsTab) renderSessionStatusBar() string {
-	hints := "Enter:resume  ^F:fork  ^Y:copy  ^R:refresh"
-	hintStyle := lipgloss.NewStyle().
-		Foreground(dimColor).
+	previewContent := strings.Join(lines, "\n")
+	return lipgloss.NewStyle().
+		Width(max(0, width)).
+		Height(max(0, height)).
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderTop(true).
-		BorderForeground(borderColor).
-		Width(s.width - 2).
-		Padding(0, 1)
-
-	return hintStyle.Render(hints)
+		BorderLeft(true).
+		BorderForeground(colorBorder).
+		PaddingLeft(1).
+		Render(previewContent)
 }
 
 // max returns the larger of two ints.

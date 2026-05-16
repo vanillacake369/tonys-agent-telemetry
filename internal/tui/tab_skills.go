@@ -40,20 +40,20 @@ type skillsDebounceMsg struct {
 
 // SkillsTab implements TabModel for the Skills tab.
 type SkillsTab struct {
-	fetcher      *skill.Fetcher
-	skills       []skill.Skill
-	filtered     []skill.Skill
-	cursor       int
-	searchInput  textinput.Model
-	preview      string
-	sortBy       skill.SortBy
-	width        int
-	height       int
-	loading      bool
-	err          error
-	cancelFn     context.CancelFunc
+	fetcher       *skill.Fetcher
+	skills        []skill.Skill
+	filtered      []skill.Skill
+	cursor        int
+	searchInput   textinput.Model
+	preview       string
+	sortBy        skill.SortBy
+	width         int
+	height        int
+	loading       bool
+	err           error
+	cancelFn      context.CancelFunc
 	lastKeystroke time.Time
-	keys         KeyMap
+	keys          KeyMap
 }
 
 // NewSkillsTab creates an initialised SkillsTab.
@@ -300,90 +300,54 @@ func sortByIcon(s skill.SortBy) string {
 func (t SkillsTab) SetSize(width, height int) TabModel {
 	t.width = width
 	t.height = height
-	t.searchInput.Width = width - 20
+	t.searchInput.Width = max(1, width-20)
 	return t
 }
 
 // View renders the skills tab.
 func (t SkillsTab) View() string {
 	if t.width == 0 || t.height == 0 {
-		return "Skills\nLoading..."
+		if t.loading {
+			return lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render("Loading skills...")
+		}
+		return "Skills"
 	}
 
-	searchBarHeight := 3
-	hintBarHeight := 2
-	listHeight := t.height - searchBarHeight - hintBarHeight
-	if listHeight < 1 {
-		listHeight = 1
-	}
+	// Layout:
+	//   search bar : 1 line
+	//   gap        : 1 line
+	//   list+preview: remaining height - 1 (hint)
+	//   hint bar   : 1 line
+	const hintHeight = 1
+	const searchHeight = 1
+	const gapHeight = 1
+	listHeight := max(1, t.height-searchHeight-gapHeight-hintHeight)
 
-	searchBar := t.renderSearchBar()
-	mainContent := t.renderMainContent(listHeight)
-	hintBar := t.renderHintBar()
-
-	return strings.Join([]string{searchBar, mainContent, hintBar}, "\n")
-}
-
-// renderSearchBar renders the search input with the current sort mode.
-func (t SkillsTab) renderSearchBar() string {
 	sortLabel := fmt.Sprintf("Sort: %s %s", sortByIcon(t.sortBy), sortByLabel(t.sortBy))
-	sortStyle := lipgloss.NewStyle().Foreground(primaryColor).Bold(true)
-	sortRendered := sortStyle.Render(sortLabel)
+	searchBar := RenderSearchBar(t.searchInput, t.width, sortLabel)
 
-	inputView := t.searchInput.View()
+	leftW, rightW, showPreview := SplitLayout(t.width, 45)
 
-	// Pad input to fill the remaining width.
-	rightWidth := lipgloss.Width(sortRendered) + 2
-	inputWidth := t.width - rightWidth - 4
-	if inputWidth < 10 {
-		inputWidth = 10
+	left := t.renderSkillList(leftW, listHeight)
+	right := ""
+	if showPreview {
+		right = t.renderPreview(rightW, listHeight)
 	}
 
-	row := lipgloss.JoinHorizontal(
-		lipgloss.Center,
-		lipgloss.NewStyle().Width(inputWidth).Render(inputView),
-		lipgloss.NewStyle().Width(rightWidth).Align(lipgloss.Right).Render(sortRendered),
-	)
+	splitView := RenderSplitView(left, right, leftW, rightW, listHeight, showPreview)
+	hintBar := RenderHintBar("Enter:analyze  ^T:sort  ^Y:copy  ^R:refresh", t.width)
 
-	searchStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderBottom(true).
-		BorderForeground(borderColor).
-		Padding(0, 1).
-		Width(t.width - 2)
-
-	return searchStyle.Render(row)
-}
-
-// renderMainContent renders the split list/preview area.
-func (t SkillsTab) renderMainContent(height int) string {
-	leftWidth := t.width * 45 / 100
-	rightWidth := t.width - leftWidth - 1
-
-	left := t.renderSkillList(leftWidth, height)
-	right := t.renderPreview(rightWidth, height)
-
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	return strings.Join([]string{searchBar, "", splitView, hintBar}, "\n")
 }
 
 // renderSkillList renders the left panel with the filtered skill list.
 func (t SkillsTab) renderSkillList(width, height int) string {
-	listStyle := lipgloss.NewStyle().
-		Width(width).
-		Height(height)
-
 	if t.loading {
-		return listStyle.Render(
-			lipgloss.NewStyle().Foreground(dimColor).Italic(true).Render("Loading skills..."),
-		)
+		return RenderEmptyState("Loading skills...", width, height)
 	}
 
 	if len(t.filtered) == 0 {
-		empty := lipgloss.NewStyle().
-			Foreground(dimColor).
-			Italic(true).
-			Render("No skills found")
-		return listStyle.Render(empty)
+		return RenderEmptyState("No skills found", width, height)
 	}
 
 	scrollOffset := t.cursor - height + 1
@@ -391,29 +355,14 @@ func (t SkillsTab) renderSkillList(width, height int) string {
 		scrollOffset = 0
 	}
 
-	selectedStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(primaryColor)
-	normalStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.AdaptiveColor{Light: "#333333", Dark: "#CCCCCC"})
-
 	var rows []string
 	for i := scrollOffset; i < len(t.filtered) && i < scrollOffset+height; i++ {
 		s := t.filtered[i]
-		line := formatSkillLine(s, width-3)
-
-		if i == t.cursor {
-			rows = append(rows, lipgloss.NewStyle().
-				Width(width).
-				Render("> "+selectedStyle.Render(line)))
-		} else {
-			rows = append(rows, lipgloss.NewStyle().
-				Width(width).
-				Render("  "+normalStyle.Render(line)))
-		}
+		line := formatSkillLine(s, max(1, width-3))
+		rows = append(rows, RenderListItem(line, i == t.cursor, width))
 	}
 
-	return listStyle.Render(strings.Join(rows, "\n"))
+	return strings.Join(rows, "\n")
 }
 
 // formatSkillLine formats a single skill entry for display.
@@ -451,62 +400,27 @@ func formatSkillLine(s skill.Skill, maxWidth int) string {
 // renderPreview renders the right preview panel.
 func (t SkillsTab) renderPreview(width, height int) string {
 	previewStyle := lipgloss.NewStyle().
-		Width(width).
-		Height(height).
+		Width(max(0, width)).
+		Height(max(0, height)).
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderLeft(true).
-		BorderForeground(borderColor).
+		BorderForeground(colorBorder).
 		PaddingLeft(1)
 
 	if len(t.filtered) == 0 {
 		return previewStyle.Render(
-			lipgloss.NewStyle().
-				Foreground(dimColor).
-				Italic(true).
-				Render("No skill selected"),
+			lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render("No skill selected"),
 		)
 	}
 
 	if t.preview == "" {
 		return previewStyle.Render(
-			lipgloss.NewStyle().
-				Foreground(dimColor).
-				Italic(true).
-				Render("Loading preview..."),
+			lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render("Loading preview..."),
 		)
 	}
 
-	// Wrap/truncate to fit the pane.
-	contentWidth := width - 4
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
-	lines := strings.Split(t.preview, "\n")
-	var displayLines []string
-	for _, line := range lines {
-		if len([]rune(line)) > contentWidth {
-			runes := []rune(line)
-			line = string(runes[:contentWidth])
-		}
-		displayLines = append(displayLines, line)
-		if len(displayLines) >= height-2 {
-			break
-		}
-	}
+	contentWidth := max(10, width-4)
+	content := wrapLines(t.preview, contentWidth, max(1, height-2))
 
-	return previewStyle.Render(strings.Join(displayLines, "\n"))
-}
-
-// renderHintBar renders the key hint bar at the bottom.
-func (t SkillsTab) renderHintBar() string {
-	hints := "Enter:analyze  ^T:sort  ^Y:copy  ^R:refresh"
-	hintStyle := lipgloss.NewStyle().
-		Foreground(dimColor).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderTop(true).
-		BorderForeground(borderColor).
-		Width(t.width - 2).
-		Padding(0, 1)
-
-	return hintStyle.Render(hints)
+	return previewStyle.Render(content)
 }
