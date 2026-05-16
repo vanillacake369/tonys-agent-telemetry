@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -237,8 +238,10 @@ func (t SkillsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 
 		case key.Matches(msg, t.keys.Sort):
 			t.sortBy = nextSortBy(t.sortBy)
-			t.cancelInFlight()
-			return t, t.searchCmd(t.searchInput.Value(), t.sortBy)
+			// Re-sort existing results locally (no new fetch).
+			t.skills = mergeLocalAndGitHub(t.localSkills, t.githubSkills, t.sortBy)
+			t.applyFilter()
+			return t, nil
 
 		case key.Matches(msg, t.keys.Up):
 			if t.cursor > 0 {
@@ -288,8 +291,9 @@ func (t *SkillsTab) fetchGitHubCmd(query string, sortBy skill.SortBy) tea.Cmd {
 	}
 }
 
-// applyFilter applies a fuzzy filter over t.skills using the current search query.
-// It updates t.filtered in-place and clamps t.cursor.
+// applyFilter filters local skills by query substring match.
+// Remote skills (GitHub/npm/awesome) are always included — they were already
+// matched by the API's own search, so re-filtering them drops valid results.
 func (t *SkillsTab) applyFilter() {
 	query := strings.ToLower(t.searchInput.Value())
 	if query == "" {
@@ -302,6 +306,12 @@ func (t *SkillsTab) applyFilter() {
 
 	filtered := make([]skill.Skill, 0, len(t.skills))
 	for _, s := range t.skills {
+		// Remote results: always include (API already matched them).
+		if s.Source != skill.SourceLocal {
+			filtered = append(filtered, s)
+			continue
+		}
+		// Local results: substring match on name + description.
 		nameLower := strings.ToLower(s.Name)
 		descLower := strings.ToLower(s.Description)
 		if strings.Contains(nameLower, query) || strings.Contains(descLower, query) {
@@ -314,11 +324,25 @@ func (t *SkillsTab) applyFilter() {
 	}
 }
 
-// mergeLocalAndGitHub combines local and GitHub skills, local first.
-func mergeLocalAndGitHub(local, github []skill.Skill, sortBy skill.SortBy) []skill.Skill {
-	result := make([]skill.Skill, 0, len(local)+len(github))
+// mergeLocalAndGitHub combines local and remote skills. Local first, then remote sorted by sortBy.
+func mergeLocalAndGitHub(local, remote []skill.Skill, sortBy skill.SortBy) []skill.Skill {
+	// Sort remote results by the chosen criterion.
+	sorted := make([]skill.Skill, len(remote))
+	copy(sorted, remote)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		switch sortBy {
+		case skill.SortByCreated:
+			return sorted[i].CreatedAt.After(sorted[j].CreatedAt)
+		case skill.SortByUpdated:
+			return sorted[i].UpdatedAt.After(sorted[j].UpdatedAt)
+		default:
+			return sorted[i].Stars > sorted[j].Stars
+		}
+	})
+
+	result := make([]skill.Skill, 0, len(local)+len(sorted))
 	result = append(result, local...)
-	result = append(result, github...)
+	result = append(result, sorted...)
 	return result
 }
 
