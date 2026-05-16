@@ -59,8 +59,8 @@ func NewApp() App {
 	tabs := map[Tab]TabModel{
 		TabSessions: NewSessionsTab(),
 		TabAgents:   NewAgentsTab(),
-		TabDAG:      newPlaceholderTab("DAG"),
-		TabSkills:   newPlaceholderTab("Skills"),
+		TabDAG:      NewDAGTab(),
+		TabSkills:   NewSkillsTab(),
 	}
 	return App{
 		activeTab: TabSessions,
