@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -254,15 +255,18 @@ func renderProjectSection(s data.CostSummary, width int) string {
 		entries = entries[:10]
 	}
 
+	const nameWidth = 16
 	var lines []string
 	for _, e := range entries {
 		bar := renderBar(e.cost, maxCost, barWidth)
-		// Truncate long project names.
-		name := e.name
-		if len(name) > 22 {
-			name = name[:19] + "..."
+		// Use just the directory base name to avoid long paths.
+		name := filepath.Base(e.name)
+		// Truncate with ellipsis if still too long.
+		if len([]rune(name)) > nameWidth {
+			name = string([]rune(name)[:nameWidth-3]) + "..."
 		}
-		line := fmt.Sprintf("  %-22s %s  $%.2f", name, bar, e.cost)
+		nameCol := lipgloss.NewStyle().Width(nameWidth).MaxWidth(nameWidth).Render(name)
+		line := fmt.Sprintf("  %s %s  $%.2f", nameCol, bar, e.cost)
 		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")

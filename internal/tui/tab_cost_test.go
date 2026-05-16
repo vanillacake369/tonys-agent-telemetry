@@ -276,6 +276,46 @@ func TestApp_CostTab_InTabBar(t *testing.T) {
 	}
 }
 
+// ── renderProjectSection ──────────────────────────────────────────────────────
+
+func TestRenderProjectSection_UsesBaseName(t *testing.T) {
+	s := data.CostSummary{
+		ByProject: map[string]float64{
+			"/Users/limjihoon/dev/tonys-nix": 1.50,
+			"/Users/limjihoon/dev/proj-b":    0.75,
+		},
+		TotalCostUSD: 2.25,
+	}
+	out := renderProjectSection(s, 80)
+
+	// Full paths should not appear; base names should.
+	if strings.Contains(out, "/Users/limjihoon/dev/tonys-nix") {
+		t.Error("renderProjectSection should not show full path, want base name only")
+	}
+	if !strings.Contains(out, "tonys-nix") {
+		t.Errorf("renderProjectSection should show base name 'tonys-nix', got:\n%s", out)
+	}
+}
+
+func TestRenderProjectSection_TruncatesLongBaseName(t *testing.T) {
+	s := data.CostSummary{
+		ByProject: map[string]float64{
+			"/a/very-long-project-name-that-exceeds-limit": 1.00,
+		},
+		TotalCostUSD: 1.00,
+	}
+	out := renderProjectSection(s, 80)
+
+	// The rendered name column width is 16; truncated names end with "...".
+	if !strings.Contains(out, "...") {
+		t.Errorf("renderProjectSection should truncate long base names with '...', got:\n%s", out)
+	}
+	// The full base name must not appear verbatim.
+	if strings.Contains(out, "very-long-project-name-that-exceeds-limit") {
+		t.Errorf("renderProjectSection should not show full long base name, got:\n%s", out)
+	}
+}
+
 // errTest is a simple error type for testing error states.
 type errTest string
 
