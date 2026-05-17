@@ -545,6 +545,7 @@ func (t SkillsTab) View() string {
 
 // renderSkillListWithSearch renders a search input (with sort label) followed by the skill list.
 // The search input is embedded at the top of the panel content area.
+// Column widths in the header must match those used in formatSkillLine (SSoT).
 func (t SkillsTab) renderSkillListWithSearch(width, height int) string {
 	sortLabel := fmt.Sprintf("Sort: %s %s", sortByIcon(t.sortBy), sortByLabel(t.sortBy))
 	sortRendered := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).Render(sortLabel)
@@ -557,7 +558,12 @@ func (t SkillsTab) renderSkillListWithSearch(width, height int) string {
 	)
 	headerStyle := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
 	dimSep := lipgloss.NewStyle().Foreground(colorDim)
-	headerLine := headerStyle.Render("   SRC  NAME                    META")
+
+	// Wide-mode column widths: same as formatSkillLine (SSoT).
+	srcH := PadToWidth("SRC", 4)
+	nameH := PadToWidth("NAME", 22)
+	metaH := "META"
+	headerLine := headerStyle.Render("   " + srcH + nameH + metaH)
 	sepLine := dimSep.Render(strings.Repeat("─", min(width, 60)))
 
 	listHeight := max(1, height-3) // search + header + sep
@@ -571,6 +577,9 @@ func (t SkillsTab) renderSkillList(width, height int) string {
 		return RenderEmptyState("Loading skills...", width, height)
 	}
 
+	query := t.searchInput.Value()
+	baseStyle := lipgloss.NewStyle().Foreground(colorText)
+
 	var rows []string
 
 	// Show the filtered skill items.
@@ -583,6 +592,9 @@ func (t SkillsTab) renderSkillList(width, height int) string {
 		for i := scrollOffset; i < len(t.filtered) && i < scrollOffset+height; i++ {
 			s := t.filtered[i]
 			line := formatSkillLine(s, max(1, width-3))
+			if query != "" {
+				line = HighlightMatch(line, query, baseStyle)
+			}
 			rows = append(rows, RenderListItem(line, i == t.cursor, width))
 		}
 	}
@@ -600,7 +612,9 @@ func (t SkillsTab) renderSkillList(width, height int) string {
 	return strings.Join(rows, "\n")
 }
 
-// formatSkillLine formats a single skill entry for display.
+// formatSkillLine formats a single skill entry for display using PadToWidth for
+// CJK-safe column alignment. Column widths mirror those in renderSkillListWithSearch (SSoT).
+// src(4) + name(22) + meta(remaining).
 func formatSkillLine(s skill.Skill, maxWidth int) string {
 	var icon, meta string
 	switch s.Source {
@@ -621,24 +635,19 @@ func formatSkillLine(s skill.Skill, maxWidth int) string {
 		meta = fmt.Sprintf("⭐%d", s.Stars)
 	}
 
-	suffix := fmt.Sprintf("  %s", meta)
-	prefix := fmt.Sprintf("%s %s", icon, s.Name)
+	// src column: icon + space = 4 display cells
+	srcCol := PadToWidth(icon, 4)
+	// name column: 22 display cells (truncated if needed)
+	nameTrunc := lipgloss.NewStyle().MaxWidth(20).Render(s.Name)
+	nameCol := PadToWidth(nameTrunc, 22)
+	// meta: fills the remainder
+	metaCol := fmt.Sprintf("  %s", meta)
 
-	available := maxWidth - len([]rune(prefix)) - len([]rune(suffix))
-	if available < 0 {
-		// Truncate name.
-		nameMax := maxWidth - len([]rune(icon)) - len([]rune(suffix)) - 2
-		if nameMax < 1 {
-			nameMax = 1
-		}
-		runes := []rune(s.Name)
-		if len(runes) > nameMax {
-			runes = runes[:nameMax]
-		}
-		prefix = fmt.Sprintf("%s %s", icon, string(runes))
+	line := srcCol + nameCol + metaCol
+	if lipgloss.Width(line) > maxWidth {
+		return lipgloss.NewStyle().MaxWidth(maxWidth).Render(line)
 	}
-
-	return prefix + suffix
+	return line
 }
 
 // renderPreview renders the right preview panel content.

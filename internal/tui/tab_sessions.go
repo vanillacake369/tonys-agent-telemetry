@@ -299,6 +299,7 @@ func (s SessionsTab) renderSessionListWithSearch(width, height int) string {
 }
 
 // renderColumnHeader renders a btop/k9s-style column header row.
+// Column widths must match those used in formatSessionLine (SSoT).
 func (s SessionsTab) renderColumnHeader(width int) string {
 	headerStyle := lipgloss.NewStyle().
 		Foreground(colorPrimary).
@@ -309,9 +310,14 @@ func (s SessionsTab) renderColumnHeader(width int) string {
 		return headerStyle.Render("   PROMPT")
 	}
 	if width < 50 {
-		return headerStyle.Render("   DATE         PROMPT")
+		return headerStyle.Render("   " + PadToWidth("DATE", 12) + "PROMPT")
 	}
-	return headerStyle.Render("   DATE         PROJECT       TURNS DUR  PROMPT") +
+	// Wide: same column widths as formatSessionLine wide mode.
+	dateH := PadToWidth("DATE", 12)
+	projH := PadToWidth("PROJECT", 13) // 12 data + 1 separator space
+	statsH := PadToWidth("T  DUR", 8)
+	promptH := "PROMPT"
+	return headerStyle.Render("   "+dateH+projH+statsH+promptH) +
 		"\n" + dimSep.Render(strings.Repeat("─", min(width, 80)))
 }
 
@@ -327,11 +333,17 @@ func (s SessionsTab) renderSessionList(width, height int) string {
 		scrollOffset = 0
 	}
 
+	query := s.searchInput.Value()
+	baseStyle := lipgloss.NewStyle().Foreground(colorText)
+
 	var rows []string
 	for i := scrollOffset; i < len(s.filtered) && i < scrollOffset+height; i++ {
 		sess := s.filtered[i]
 		// Account for the 3-char " ▸ " / "   " prefix in RenderListItem.
 		line := s.formatSessionLine(sess, max(1, width-3))
+		if query != "" {
+			line = HighlightMatch(line, query, baseStyle)
+		}
 		rows = append(rows, RenderListItem(line, i == s.cursor, width))
 	}
 
@@ -339,18 +351,30 @@ func (s SessionsTab) renderSessionList(width, height int) string {
 }
 
 // formatSessionLine formats a single session entry with responsive column widths.
-// Uses lipgloss.MaxWidth for CJK-aware truncation (double-width chars = 2 cells).
+// Uses PadToWidth for CJK-safe alignment (double-width chars = 2 cells).
 // Narrow (<35): prompt only. Medium (<50): date + prompt. Wide: date + project + stats + prompt.
+// When a search query matches in SearchText but NOT in FirstPrompt, the matching
+// context from SearchText is shown instead of the first prompt.
 func (s SessionsTab) formatSessionLine(sess data.Session, maxWidth int) string {
 	timestamp := sess.Timestamp.Format("01-02 15:04")
 	project := filepath.Base(sess.CWD)
 	if project == "" || project == "." {
 		project = filepath.Base(sess.ProjectDir)
 	}
-	prompt := strings.ReplaceAll(sess.FirstPrompt, "\n", " ")
 
-	trunc := func(s string, w int) string {
-		return lipgloss.NewStyle().MaxWidth(w).Render(s)
+	// Determine which text to display as the prompt column.
+	prompt := strings.ReplaceAll(sess.FirstPrompt, "\n", " ")
+	query := s.searchInput.Value()
+	if query != "" && !strings.Contains(strings.ToLower(prompt), strings.ToLower(query)) {
+		// Match is in SearchText but not in FirstPrompt — show surrounding context.
+		ctx := findMatchContext(sess.SearchText, query, maxWidth/2)
+		if ctx != "" {
+			prompt = "…" + strings.ReplaceAll(ctx, "\n", " ") + "…"
+		}
+	}
+
+	trunc := func(str string, w int) string {
+		return lipgloss.NewStyle().MaxWidth(w).Render(str)
 	}
 
 	if maxWidth < 35 {
@@ -358,38 +382,52 @@ func (s SessionsTab) formatSessionLine(sess data.Session, maxWidth int) string {
 	}
 
 	if maxWidth < 50 {
-		dateStr := timestamp + " "
-		remaining := max(1, maxWidth-12)
-		return dateStr + trunc(prompt, remaining)
+		// Medium: date(12) + prompt(remaining)
+		dateCol := PadToWidth(timestamp, 12)
+		remaining := max(1, maxWidth-lipgloss.Width(dateCol))
+		return dateCol + trunc(prompt, remaining)
 	}
 
-	// Wide: date(12) + project(12) + stats(8) + prompt(remaining)
-	dateCol := timestamp + " "
-	projCol := trunc(project, 12)
-	// Pad project to fixed width
-	projPad := 12 - lipgloss.Width(projCol)
-	if projPad > 0 {
-		projCol += strings.Repeat(" ", projPad)
-	}
-	// Stats column: turn count and duration (e.g. "3t 4m ")
-	statsCol := ""
+	// Wide: date(12) + project(12+1 space) + stats(8) + prompt(remaining)
+	dateCol := PadToWidth(timestamp, 12)
+	projCol := PadToWidth(trunc(project, 12), 13) // 12 data + 1 separator space
+
+	// Stats column: turn count and duration (e.g. "3t 4m "), fixed width 8.
+	var statsRaw string
 	if sess.TurnCount > 0 || sess.Duration > 0 {
 		minutes := int(sess.Duration.Minutes())
-		statsCol = fmt.Sprintf("%dt %dm ", sess.TurnCount, minutes)
-		// Pad stats to fixed width of 8
-		statsPad := 8 - lipgloss.Width(statsCol)
-		if statsPad > 0 {
-			statsCol += strings.Repeat(" ", statsPad)
-		} else if statsPad < 0 {
-			statsCol = trunc(statsCol, 8)
-		}
-	} else {
-		statsCol = strings.Repeat(" ", 8)
+		statsRaw = fmt.Sprintf("%dt %dm ", sess.TurnCount, minutes)
 	}
-	prefix := dateCol + projCol + " " + statsCol
+	statsCol := PadToWidth(trunc(statsRaw, 8), 8)
+
+	prefix := dateCol + projCol + statsCol
 	prefixWidth := lipgloss.Width(prefix)
 	remaining := max(1, maxWidth-prefixWidth)
 	return prefix + trunc(prompt, remaining)
+}
+
+// findMatchContext finds query in text and returns the surrounding context
+// centered on the match, up to maxLen characters.
+func findMatchContext(text, query string, maxLen int) string {
+	if text == "" || query == "" || maxLen <= 0 {
+		return ""
+	}
+	lower := strings.ToLower(text)
+	lowerQ := strings.ToLower(query)
+	idx := strings.Index(lower, lowerQ)
+	if idx < 0 {
+		return ""
+	}
+	// Center the match in the context window.
+	start := idx - maxLen/2
+	if start < 0 {
+		start = 0
+	}
+	end := start + maxLen
+	if end > len(text) {
+		end = len(text)
+	}
+	return text[start:end]
 }
 
 // renderPreview renders the right panel with the conversation preview and file changes.

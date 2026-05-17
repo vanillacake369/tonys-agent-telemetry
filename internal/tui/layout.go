@@ -246,6 +246,52 @@ func renderErrorState(err error, width int) string {
 		Render("Error: " + err.Error())
 }
 
+// HighlightMatch renders text with matching substrings highlighted.
+// query is the search term (case-insensitive match).
+// Matched portions get bold + a gold highlight color; rest stays in baseStyle.
+// When query is empty the full text is rendered with baseStyle unchanged.
+func HighlightMatch(text, query string, baseStyle lipgloss.Style) string {
+	if query == "" {
+		return baseStyle.Render(text)
+	}
+	lower := strings.ToLower(text)
+	lowerQ := strings.ToLower(query)
+
+	highlightStyle := baseStyle.Bold(true).Foreground(lipgloss.Color("#FFD700"))
+
+	var result strings.Builder
+	pos := 0
+	for {
+		idx := strings.Index(lower[pos:], lowerQ)
+		if idx < 0 {
+			result.WriteString(baseStyle.Render(text[pos:]))
+			break
+		}
+		// Before match
+		if idx > 0 {
+			result.WriteString(baseStyle.Render(text[pos : pos+idx]))
+		}
+		// Match
+		result.WriteString(highlightStyle.Render(text[pos+idx : pos+idx+len(lowerQ)]))
+		pos += idx + len(lowerQ)
+	}
+	return result.String()
+}
+
+// PadToWidth pads text with spaces to exactly targetWidth display cells.
+// Uses lipgloss.Width() which correctly accounts for CJK double-width characters.
+// When text already meets or exceeds targetWidth it is truncated via MaxWidth.
+func PadToWidth(text string, targetWidth int) string {
+	if targetWidth <= 0 {
+		return ""
+	}
+	currentWidth := lipgloss.Width(text)
+	if currentWidth >= targetWidth {
+		return lipgloss.NewStyle().MaxWidth(targetWidth).Render(text)
+	}
+	return text + strings.Repeat(" ", targetWidth-currentWidth)
+}
+
 // truncateToWidth truncates a rune slice to at most maxWidth visible characters,
 // appending "…" when the string is shortened.
 func truncateToWidth(s string, maxWidth int) string {

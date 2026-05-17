@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/data"
 )
 
@@ -402,6 +403,72 @@ func TestFormatSessionLine_NarrowMode_NoStats(t *testing.T) {
 	line := s.formatSessionLine(sess, 30)
 	if strings.Contains(line, "5t") {
 		t.Errorf("narrow mode should not show stats, got: %q", line)
+	}
+}
+
+func TestFormatSessionLine_WideMode_CJKProject_ColumnAlignment(t *testing.T) {
+	s := NewSessionsTab()
+	sessASCII := data.Session{
+		CWD:         "/Users/test/dev/my-project",
+		FirstPrompt: "hello world",
+		Timestamp:   time.Date(2026, 5, 16, 10, 0, 0, 0, time.UTC),
+	}
+	sessCJK := data.Session{
+		CWD:         "/Users/test/dev/한글프로젝트",
+		FirstPrompt: "hello world",
+		Timestamp:   time.Date(2026, 5, 16, 10, 0, 0, 0, time.UTC),
+	}
+	lineASCII := s.formatSessionLine(sessASCII, 80)
+	lineCJK := s.formatSessionLine(sessCJK, 80)
+
+	// Both lines must have the same total display width (within 1 cell tolerance
+	// for lipgloss internal rounding).
+	wASCII := lipgloss.Width(lineASCII)
+	wCJK := lipgloss.Width(lineCJK)
+	diff := wASCII - wCJK
+	if diff < -1 || diff > 1 {
+		t.Errorf("CJK and ASCII project names produce different column widths: ascii=%d cjk=%d",
+			wASCII, wCJK)
+	}
+}
+
+func TestFormatSessionLine_SearchContext_FallbackToSearchText(t *testing.T) {
+	s := NewSessionsTab()
+	// Set a search query in the input (focus not required for formatSessionLine).
+	s.searchInput.SetValue("unique-keyword")
+
+	sess := data.Session{
+		CWD:         "/Users/test/dev/myproject",
+		FirstPrompt: "something unrelated",
+		SearchText:  "This contains the unique-keyword in the middle of a conversation",
+		Timestamp:   time.Date(2026, 5, 16, 10, 0, 0, 0, time.UTC),
+	}
+	line := s.formatSessionLine(sess, 80)
+
+	// Should show context from SearchText, not the original FirstPrompt.
+	if strings.Contains(line, "something unrelated") {
+		t.Errorf("expected search context fallback, but got FirstPrompt in line: %q", line)
+	}
+	if !strings.Contains(line, "unique-keyword") {
+		t.Errorf("expected 'unique-keyword' context in line, got: %q", line)
+	}
+}
+
+func TestFormatSessionLine_SearchContext_ShowsFirstPromptWhenMatch(t *testing.T) {
+	s := NewSessionsTab()
+	s.searchInput.SetValue("hello")
+
+	sess := data.Session{
+		CWD:         "/Users/test/dev/myproject",
+		FirstPrompt: "hello world",
+		SearchText:  "hello world some more text",
+		Timestamp:   time.Date(2026, 5, 16, 10, 0, 0, 0, time.UTC),
+	}
+	line := s.formatSessionLine(sess, 80)
+
+	// Query matches FirstPrompt directly, so FirstPrompt should be displayed.
+	if !strings.Contains(line, "hello world") {
+		t.Errorf("expected FirstPrompt 'hello world' in line when query matches it, got: %q", line)
 	}
 }
 

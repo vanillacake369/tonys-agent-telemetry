@@ -214,6 +214,7 @@ func renderModelSection(s data.CostSummary, width int) string {
 	maxCost := entries[0].ms.Cost
 
 	const barWidth = 20
+	const modelNameWidth = 18
 	var lines []string
 	for _, e := range entries {
 		pct := 0.0
@@ -222,8 +223,10 @@ func renderModelSection(s data.CostSummary, width int) string {
 		}
 		bar := renderBar(e.ms.Cost, maxCost, barWidth)
 		tok := formatTokenCount(e.ms.Tokens)
-		line := fmt.Sprintf("  %-18s %s  $%.2f (%3.0f%%)  %s tok",
-			e.name, bar, e.ms.Cost, pct, tok)
+		// Use PadToWidth for CJK-safe label column alignment.
+		nameCol := PadToWidth(lipgloss.NewStyle().MaxWidth(modelNameWidth).Render(e.name), modelNameWidth)
+		line := fmt.Sprintf("  %s %s  $%.2f (%3.0f%%)  %s tok",
+			nameCol, bar, e.ms.Cost, pct, tok)
 		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
@@ -261,11 +264,13 @@ func renderProjectSection(s data.CostSummary, width int) string {
 		bar := renderBar(e.cost, maxCost, barWidth)
 		// Use just the directory base name to avoid long paths.
 		name := filepath.Base(e.name)
-		// Truncate with ellipsis if still too long.
-		if len([]rune(name)) > nameWidth {
+		// Truncate with "..." when the display width exceeds nameWidth.
+		// PadToWidth then ensures the column is exactly nameWidth cells wide
+		// even when the name contains CJK double-width characters.
+		if lipgloss.Width(name) > nameWidth {
 			name = string([]rune(name)[:nameWidth-3]) + "..."
 		}
-		nameCol := lipgloss.NewStyle().Width(nameWidth).MaxWidth(nameWidth).Render(name)
+		nameCol := PadToWidth(name, nameWidth)
 		line := fmt.Sprintf("  %s %s  $%.2f", nameCol, bar, e.cost)
 		lines = append(lines, line)
 	}

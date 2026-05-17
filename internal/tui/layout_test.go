@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // ── SplitLayout ──────────────────────────────────────────────────────────────
@@ -274,4 +275,102 @@ func TestRenderSplitView_ZeroDimensions(t *testing.T) {
 		}
 	}()
 	_ = RenderSplitView("left", "right", 0, 0, 0, true)
+}
+
+// ── HighlightMatch ────────────────────────────────────────────────────────────
+
+func TestHighlightMatch_EmptyQuery_NoHighlight(t *testing.T) {
+	style := lipgloss.NewStyle()
+	result := HighlightMatch("hello world", "", style)
+	// Empty query: returns plain rendered text with no extra ANSI sequences
+	// beyond what baseStyle applies. The result must still contain the text.
+	if !strings.Contains(result, "hello world") {
+		t.Errorf("HighlightMatch with empty query should contain full text, got %q", result)
+	}
+}
+
+func TestHighlightMatch_WithMatch_ContainsHighlight(t *testing.T) {
+	style := lipgloss.NewStyle()
+	result := HighlightMatch("hello world", "world", style)
+	// The matched portion must appear somewhere in the result.
+	if !strings.Contains(result, "world") {
+		t.Errorf("HighlightMatch should contain the matched word 'world', got %q", result)
+	}
+}
+
+func TestHighlightMatch_CaseInsensitive(t *testing.T) {
+	style := lipgloss.NewStyle()
+	// Query is uppercase, text is lowercase — should still match.
+	result := HighlightMatch("hello world", "WORLD", style)
+	if !strings.Contains(result, "world") {
+		t.Errorf("HighlightMatch should match case-insensitively, got %q", result)
+	}
+}
+
+func TestHighlightMatch_NoMatch_ReturnsFull(t *testing.T) {
+	style := lipgloss.NewStyle()
+	result := HighlightMatch("hello world", "xyz", style)
+	if !strings.Contains(result, "hello world") {
+		t.Errorf("HighlightMatch with no match should return full text, got %q", result)
+	}
+}
+
+func TestHighlightMatch_CJKText(t *testing.T) {
+	style := lipgloss.NewStyle()
+	// CJK characters in both text and query must not cause a panic.
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("HighlightMatch panicked on CJK input: %v", r)
+		}
+	}()
+	result := HighlightMatch("안녕 세계", "세계", style)
+	if !strings.Contains(result, "세계") {
+		t.Errorf("HighlightMatch should contain matched CJK text, got %q", result)
+	}
+}
+
+// ── PadToWidth ────────────────────────────────────────────────────────────────
+
+func TestPadToWidth_ASCII_PadsCorrectly(t *testing.T) {
+	result := PadToWidth("hi", 10)
+	got := lipgloss.Width(result)
+	if got != 10 {
+		t.Errorf("PadToWidth(\"hi\", 10) display width = %d, want 10", got)
+	}
+	if !strings.Contains(result, "hi") {
+		t.Error("PadToWidth should preserve original text")
+	}
+}
+
+func TestPadToWidth_CJK_PadsCorrectly(t *testing.T) {
+	// 한 = 2 cells, so "한글" = 4 cells. Target 10 → should add 6 spaces.
+	result := PadToWidth("한글", 10)
+	got := lipgloss.Width(result)
+	if got != 10 {
+		t.Errorf("PadToWidth(\"한글\", 10) display width = %d, want 10 (CJK 2-cell chars)", got)
+	}
+}
+
+func TestPadToWidth_ExactFit_NoChange(t *testing.T) {
+	result := PadToWidth("hello", 5)
+	got := lipgloss.Width(result)
+	if got != 5 {
+		t.Errorf("PadToWidth exact fit: display width = %d, want 5", got)
+	}
+}
+
+func TestPadToWidth_Overflow_Truncates(t *testing.T) {
+	// Text is longer than target — should not exceed targetWidth.
+	result := PadToWidth("hello world", 5)
+	got := lipgloss.Width(result)
+	if got > 5 {
+		t.Errorf("PadToWidth overflow: display width = %d, want <= 5", got)
+	}
+}
+
+func TestPadToWidth_ZeroTarget_ReturnsEmpty(t *testing.T) {
+	result := PadToWidth("hello", 0)
+	if result != "" {
+		t.Errorf("PadToWidth with targetWidth=0 should return empty, got %q", result)
+	}
 }
