@@ -195,11 +195,11 @@ func (s *SessionsTab) applyFilter() {
 		return
 	}
 
-	// Build search targets combining FirstPrompt, CWD, GitBranch, and Model.
+	// Build search targets from ALL user messages + metadata.
 	targets := make([]string, len(s.sessions))
 	for i, sess := range s.sessions {
 		targets[i] = strings.Join([]string{
-			sess.FirstPrompt,
+			sess.SearchText, // all user messages concatenated
 			sess.CWD,
 			sess.GitBranch,
 			sess.Model,
@@ -289,13 +289,34 @@ func (s SessionsTab) View() string {
 	return splitView
 }
 
-// renderSessionListWithSearch renders a search input line followed by the session list.
-// The search input is embedded at the top of the panel content area.
+// renderSessionListWithSearch renders search + column header + session list.
 func (s SessionsTab) renderSessionListWithSearch(width, height int) string {
 	searchLine := " " + s.searchInput.View()
-	listHeight := max(1, height-1) // -1 for the search line
+	headerLine := s.renderColumnHeader(width)
+	headerLines := 1
+	if width >= 50 {
+		headerLines = 2 // header + separator line
+	}
+	listHeight := max(1, height-1-headerLines) // -1 search, -N header
 	listContent := s.renderSessionList(width, listHeight)
-	return searchLine + "\n" + listContent
+	return searchLine + "\n" + headerLine + "\n" + listContent
+}
+
+// renderColumnHeader renders a btop/k9s-style column header row.
+func (s SessionsTab) renderColumnHeader(width int) string {
+	headerStyle := lipgloss.NewStyle().
+		Foreground(colorPrimary).
+		Bold(true)
+	dimSep := lipgloss.NewStyle().Foreground(colorDim)
+
+	if width < 35 {
+		return headerStyle.Render("   PROMPT")
+	}
+	if width < 50 {
+		return headerStyle.Render("   DATE         PROMPT")
+	}
+	return headerStyle.Render("   DATE         PROJECT       TURNS DUR  PROMPT") +
+		"\n" + dimSep.Render(strings.Repeat("─", min(width, 80)))
 }
 
 // renderSessionList renders the filtered sessions list.

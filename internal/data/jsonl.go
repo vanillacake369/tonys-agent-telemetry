@@ -135,6 +135,8 @@ func ParseSessionHeader(filepath string) (*Session, error) {
 	session := &Session{FilePath: filepath}
 	foundAny := false
 	var lastTimestamp time.Time
+	var searchParts []string
+	const maxSearchTextLen = 2000 // cap total search text to limit memory
 	scanner := bufio.NewScanner(f)
 	// Increase buffer size for long lines.
 	buf := make([]byte, 1<<20)
@@ -177,17 +179,24 @@ func ParseSessionHeader(filepath string) (*Session, error) {
 			}
 		}
 
-		// Count user turns and extract first user prompt.
+		// Count user turns, extract prompts, and build search text.
 		if msg.Type == "user" && msg.Message != nil {
 			session.TurnCount++
-			// Extract first user prompt. Newlines are replaced with spaces
-			// to prevent multi-line list items from breaking TUI layout.
-			if session.FirstPrompt == "" {
-				text := extractTextFromContent(msg.Message.Content, false)
-				text = strings.ReplaceAll(text, "\n", " ")
-				text = strings.ReplaceAll(text, "\r", "")
-				if text != "" {
+			text := extractTextFromContent(msg.Message.Content, false)
+			text = strings.ReplaceAll(text, "\n", " ")
+			text = strings.ReplaceAll(text, "\r", "")
+
+			if text != "" {
+				if session.FirstPrompt == "" {
 					session.FirstPrompt = truncate(text, maxFirstPromptLen)
+				}
+				// Collect all user messages for full-text search.
+				currentLen := 0
+				for _, p := range searchParts {
+					currentLen += len(p)
+				}
+				if currentLen < maxSearchTextLen {
+					searchParts = append(searchParts, truncate(text, 200))
 				}
 			}
 		}
@@ -205,6 +214,9 @@ func ParseSessionHeader(filepath string) (*Session, error) {
 	if !foundAny {
 		return nil, fmt.Errorf("no usable data in %s", filepath)
 	}
+
+	// Build search text from all collected user messages.
+	session.SearchText = strings.Join(searchParts, " ")
 
 	// Compute duration from first to last observed timestamp.
 	if !session.Timestamp.IsZero() && lastTimestamp.After(session.Timestamp) {

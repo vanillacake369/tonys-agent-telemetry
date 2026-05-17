@@ -9,6 +9,7 @@ type Session struct {
 	CWD         string
 	GitBranch   string
 	FirstPrompt string        // first user message (truncated to 100 chars)
+	SearchText  string        // all user messages concatenated (for full-text search)
 	Timestamp   time.Time
 	Model       string        // e.g. "claude-opus-4-6"
 	Version     string

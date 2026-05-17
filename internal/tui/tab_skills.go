@@ -555,9 +555,14 @@ func (t SkillsTab) renderSkillListWithSearch(width, height int) string {
 		lipgloss.NewStyle().Width(inputWidth).Render(" "+t.searchInput.View()),
 		lipgloss.NewStyle().Width(sortWidth).Align(lipgloss.Right).Render(sortRendered),
 	)
-	listHeight := max(1, height-1) // -1 for the search line
+	headerStyle := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+	dimSep := lipgloss.NewStyle().Foreground(colorDim)
+	headerLine := headerStyle.Render("   SRC  NAME                    META")
+	sepLine := dimSep.Render(strings.Repeat("─", min(width, 60)))
+
+	listHeight := max(1, height-3) // search + header + sep
 	listContent := t.renderSkillList(width, listHeight)
-	return searchLine + "\n" + listContent
+	return searchLine + "\n" + headerLine + "\n" + sepLine + "\n" + listContent
 }
 
 // renderSkillList renders the left panel with the filtered skill list.
