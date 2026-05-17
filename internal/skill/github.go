@@ -279,16 +279,34 @@ func SearchGitHubCode(ctx context.Context, query string, limit int) ([]Skill, er
 			name = parts[len(parts)-2]
 		}
 
+		// Fetch star count from repo metadata.
+		stars := fetchRepoStars(ctx, repoKey)
+
 		skills = append(skills, Skill{
 			Name:        name,
 			Description: fmt.Sprintf("Found in %s", repoKey),
 			Source:      SourceGitHub,
 			URL:         repoURL,
+			Stars:       stars,
 			ReadmeURL:   fmt.Sprintf("%s/blob/main/%s", repoURL, r.Path),
 		})
 	}
 
 	return skills, nil
+}
+
+// fetchRepoStars fetches stargazers count for a single repo via gh api.
+// Returns 0 on any error (non-blocking).
+func fetchRepoStars(ctx context.Context, repoFullName string) int {
+	cmd := exec.CommandContext(ctx, "gh", "api", fmt.Sprintf("repos/%s", repoFullName), "--jq", ".stargazers_count")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	s := strings.TrimSpace(string(out))
+	var stars int
+	fmt.Sscanf(s, "%d", &stars)
+	return stars
 }
 
 // deduplicateCodeResults returns one entry per unique repository FullName.

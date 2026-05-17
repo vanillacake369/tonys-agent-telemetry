@@ -88,6 +88,10 @@ func crawlRegistry(ctx context.Context, reg registryRepo) ([]Skill, error) {
 	}
 
 	repoURL := fmt.Sprintf("https://github.com/%s/%s", reg.Owner, reg.Repo)
+
+	// Fetch star count once for the entire repo.
+	repoStars := fetchRegistryStars(ctx, reg.Owner, reg.Repo)
+
 	var skills []Skill
 	for _, entry := range tree.Tree {
 		if entry.Type != "blob" {
@@ -128,11 +132,26 @@ func crawlRegistry(ctx context.Context, reg registryRepo) ([]Skill, error) {
 			Description: desc,
 			Source:      SourceGitHub,
 			URL:         skillURL,
+			Stars:       repoStars,
 			ReadmeURL:   skillURL,
 		})
 	}
 
 	return skills, nil
+}
+
+// fetchRegistryStars fetches the star count for a registry repo.
+func fetchRegistryStars(ctx context.Context, owner, repo string) int {
+	cmd := exec.CommandContext(ctx, "gh", "api",
+		fmt.Sprintf("repos/%s/%s", owner, repo), "--jq", ".stargazers_count")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	s := strings.TrimSpace(string(out))
+	var stars int
+	fmt.Sscanf(s, "%d", &stars)
+	return stars
 }
 
 // AddRegistry adds a custom registry repo to the known list at runtime.
