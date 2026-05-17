@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -135,11 +136,62 @@ func crawlRegistry(ctx context.Context, reg registryRepo) ([]Skill, error) {
 }
 
 // AddRegistry adds a custom registry repo to the known list at runtime.
-// Useful for user-configured registries.
-func AddRegistry(owner, repo, branch string) {
+func AddRegistry(owner, repo, branch, description string) {
+	if branch == "" {
+		branch = "main"
+	}
+	if description == "" {
+		description = fmt.Sprintf("%s/%s skill registry", owner, repo)
+	}
 	knownRegistries = append(knownRegistries, registryRepo{
-		Owner:  owner,
-		Repo:   repo,
-		Branch: branch,
+		Owner:       owner,
+		Repo:        repo,
+		Branch:      branch,
+		Description: description,
 	})
+}
+
+// userRegistryConfig is the JSON structure for ~/.claude/skill-registries.json.
+type userRegistryConfig struct {
+	Registries []struct {
+		Owner       string `json:"owner"`
+		Repo        string `json:"repo"`
+		Branch      string `json:"branch"`
+		Description string `json:"description"`
+	} `json:"registries"`
+}
+
+// LoadUserRegistries reads ~/.claude/skill-registries.json and adds entries
+// to the known registries list. Called at init time. Silently no-ops if
+// the file doesn't exist or is malformed.
+func LoadUserRegistries() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	configPath := filepath.Join(home, ".claude", "skill-registries.json")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return
+	}
+
+	var config userRegistryConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		log.Printf("skill: parsing skill-registries.json: %v", err)
+		return
+	}
+
+	for _, r := range config.Registries {
+		if r.Owner == "" || r.Repo == "" {
+			continue
+		}
+		AddRegistry(r.Owner, r.Repo, r.Branch, r.Description)
+	}
+	if len(config.Registries) > 0 {
+		log.Printf("skill: loaded %d user registries from %s", len(config.Registries), configPath)
+	}
+}
+
+func init() {
+	LoadUserRegistries()
 }
