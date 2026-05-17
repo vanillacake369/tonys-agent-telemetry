@@ -40,6 +40,7 @@ type OpenDetailMsg struct {
 type SessionsTab struct {
 	sessions    []data.Session
 	filtered    []data.Session
+	searchIndex []string // pre-computed lowercase search targets, one per session
 	cursor      int
 	searchInput textinput.Model
 	preview     []data.Turn
@@ -85,6 +86,12 @@ func (s SessionsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		s.filtered = msg.Sessions
 		s.cursor = 0
 		s.fileChanges = nil
+		s.searchIndex = make([]string, len(s.sessions))
+		for i, sess := range s.sessions {
+			s.searchIndex[i] = strings.ToLower(strings.Join([]string{
+				sess.SearchText, sess.CWD, sess.GitBranch, sess.Model,
+			}, " "))
+		}
 		return s, s.loadPreviewCmd()
 
 	case PreviewLoadedMsg:
@@ -202,6 +209,8 @@ func (s SessionsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 
 // applyFilter uses case-insensitive substring match across all session content.
 // Fuzzy matching is too loose on long SearchText (2KB) — substring is more precise.
+// Search targets are pre-computed in searchIndex at load time to avoid redundant
+// ToLower + Join work on every keystroke.
 func (s *SessionsTab) applyFilter() {
 	query := strings.ToLower(s.searchInput.Value())
 	if query == "" {
@@ -210,15 +219,9 @@ func (s *SessionsTab) applyFilter() {
 	}
 
 	filtered := make([]data.Session, 0)
-	for _, sess := range s.sessions {
-		target := strings.ToLower(strings.Join([]string{
-			sess.SearchText,
-			sess.CWD,
-			sess.GitBranch,
-			sess.Model,
-		}, " "))
-		if strings.Contains(target, query) {
-			filtered = append(filtered, sess)
+	for i, idx := range s.searchIndex {
+		if strings.Contains(idx, query) {
+			filtered = append(filtered, s.sessions[i])
 		}
 	}
 	s.filtered = filtered
