@@ -115,14 +115,13 @@ func (d DetailView) Update(msg tea.Msg) (DetailView, tea.Cmd) {
 				d.searching = false
 				d.searchInput.Blur()
 				newQuery := d.searchInput.Value()
-				if newQuery != d.query {
-					d.query = newQuery
-					d.buildMatchIndex()
-					d.matchIdx = 0
-					// Jump to first match.
-					if len(d.matchTurns) > 0 && d.matchTurns[0] < len(d.turnLineStart) {
-						d.viewport.SetYOffset(d.turnLineStart[d.matchTurns[0]])
-					}
+				d.query = newQuery
+				d.rebuildContent() // re-render with highlights
+				d.buildMatchIndex()
+				d.matchIdx = 0
+				// Jump to first match.
+				if len(d.matchTurns) > 0 && d.matchTurns[0] < len(d.turnLineStart) {
+					d.viewport.SetYOffset(d.turnLineStart[d.matchTurns[0]])
 				}
 				return d, nil
 			default:
@@ -151,6 +150,7 @@ func (d DetailView) Update(msg tea.Msg) (DetailView, tea.Cmd) {
 				d.query = ""
 				d.matchTurns = nil
 				d.searchInput.SetValue("")
+				d.rebuildContent() // remove highlights
 				return d, nil
 			}
 			// Signal to close overlay — handled by parent.
@@ -491,11 +491,15 @@ func (d DetailView) renderTurn(idx int, turn data.DetailTurn, width int) string 
 		// Compact: thinking entirely hidden for clean readability.
 	}
 
-	// Main content.
+	// Main content — highlight query matches if active.
 	if turn.Content != "" {
+		contentStyle := lipgloss.NewStyle().Foreground(colorText)
 		lines := strings.Split(turn.Content, "\n")
 		for _, line := range lines {
 			wrapped := softWrap(line, max(10, width-2))
+			if d.query != "" {
+				wrapped = HighlightMatch(wrapped, d.query, contentStyle)
+			}
 			sb.WriteString("  " + wrapped + "\n")
 		}
 	}
