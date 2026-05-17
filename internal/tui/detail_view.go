@@ -24,12 +24,14 @@ type DetailView struct {
 	session       data.Session
 	turns         []data.DetailTurn
 	toolCollapsed map[int]bool // turn index → collapsed state (default true)
+	turnLineStart []int        // line number where each turn starts (for {/} jump)
 	viewport      viewport.Model
 	width         int
 	height        int
 	loading       bool
 	err           error
 	keys          KeyMap
+	pendingG      bool // true when 'g' was pressed, waiting for second key
 }
 
 // NewDetailView creates a detail view for the given session.
@@ -77,6 +79,17 @@ func (d DetailView) Update(msg tea.Msg) (DetailView, tea.Cmd) {
 		return d, nil
 
 	case tea.KeyMsg:
+		// Handle pending 'g' for gg combo.
+		if d.pendingG {
+			d.pendingG = false
+			if msg.String() == "g" {
+				// gg → go to top
+				d.viewport.GotoTop()
+				return d, nil
+			}
+			// Not 'g' — fall through to normal handling.
+		}
+
 		switch {
 		case key.Matches(msg, d.keys.Escape):
 			// Signal to close overlay — handled by parent.
@@ -87,9 +100,52 @@ func (d DetailView) Update(msg tea.Msg) (DetailView, tea.Cmd) {
 			d.toggleNearestTool()
 			d.rebuildContent()
 			return d, nil
+
+		// ── Vim motions ──
+		case msg.String() == "g":
+			// First 'g' press — wait for second key.
+			d.pendingG = true
+			return d, nil
+
+		case msg.String() == "G":
+			// G → go to bottom
+			d.viewport.GotoBottom()
+			return d, nil
+
+		case msg.String() == "{":
+			// Jump to previous turn boundary.
+			d.jumpToPrevTurn()
+			return d, nil
+
+		case msg.String() == "}":
+			// Jump to next turn boundary.
+			d.jumpToNextTurn()
+			return d, nil
+
+		case msg.Type == tea.KeyCtrlD:
+			// Half-page down.
+			half := max(1, d.viewport.Height/2)
+			d.viewport.LineDown(half)
+			return d, nil
+
+		case msg.Type == tea.KeyCtrlU:
+			// Half-page up.
+			half := max(1, d.viewport.Height/2)
+			d.viewport.LineUp(half)
+			return d, nil
+
+		case msg.Type == tea.KeyCtrlF || msg.Type == tea.KeyPgDown:
+			// Full page down.
+			d.viewport.LineDown(d.viewport.Height)
+			return d, nil
+
+		case msg.Type == tea.KeyCtrlB || msg.Type == tea.KeyPgUp:
+			// Full page up.
+			d.viewport.LineUp(d.viewport.Height)
+			return d, nil
 		}
 
-		// Delegate scrolling to viewport.
+		// Delegate scrolling to viewport (j/k/up/down).
 		var vpCmd tea.Cmd
 		d.viewport, vpCmd = d.viewport.Update(msg)
 		return d, vpCmd
@@ -195,7 +251,7 @@ func (d DetailView) renderHeader(width int) string {
 
 // renderFooter renders the bottom hint bar with scroll position.
 func (d DetailView) renderFooter(width int) string {
-	hints := "j/k:scroll  t:toggle-tools  Esc:close"
+	hints := "j/k:scroll  {/}:turn  gg/G:top/bottom  ^d/^u:half-page  t:tools  Esc:close"
 	scrollPct := ""
 	if d.viewport.TotalLineCount() > 0 {
 		pct := int(d.viewport.ScrollPercent() * 100)
@@ -211,19 +267,57 @@ func (d DetailView) renderFooter(width int) string {
 	return footerStyle.Render(line)
 }
 
-// rebuildContent renders all turns into the viewport.
+// rebuildContent renders all turns into the viewport and records line offsets.
 func (d *DetailView) rebuildContent() {
 	contentW := max(10, d.viewport.Width-2)
 	var sb strings.Builder
+	d.turnLineStart = make([]int, 0, len(d.turns))
+	lineCount := 0
 
 	for i, turn := range d.turns {
 		if i > 0 {
 			sb.WriteString("\n")
+			lineCount++
 		}
-		sb.WriteString(d.renderTurn(i, turn, contentW))
+		d.turnLineStart = append(d.turnLineStart, lineCount)
+		rendered := d.renderTurn(i, turn, contentW)
+		sb.WriteString(rendered)
+		lineCount += strings.Count(rendered, "\n")
 	}
 
 	d.viewport.SetContent(sb.String())
+}
+
+// jumpToNextTurn scrolls to the start of the next turn relative to current position.
+func (d *DetailView) jumpToNextTurn() {
+	if len(d.turnLineStart) == 0 {
+		return
+	}
+	currentLine := d.viewport.YOffset
+	for _, lineStart := range d.turnLineStart {
+		if lineStart > currentLine {
+			d.viewport.SetYOffset(lineStart)
+			return
+		}
+	}
+	// Already past last turn — go to bottom.
+	d.viewport.GotoBottom()
+}
+
+// jumpToPrevTurn scrolls to the start of the previous turn relative to current position.
+func (d *DetailView) jumpToPrevTurn() {
+	if len(d.turnLineStart) == 0 {
+		return
+	}
+	currentLine := d.viewport.YOffset
+	for i := len(d.turnLineStart) - 1; i >= 0; i-- {
+		if d.turnLineStart[i] < currentLine {
+			d.viewport.SetYOffset(d.turnLineStart[i])
+			return
+		}
+	}
+	// Already at first turn — go to top.
+	d.viewport.GotoTop()
 }
 
 // renderTurn renders a single turn.
