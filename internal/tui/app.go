@@ -272,7 +272,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		updated, cmd := a.tabs[TabCost].Update(msg)
 		a.tabs[TabCost] = updated
 		return a, cmd
-	case LocalSkillsLoadedMsg, GitHubSkillsLoadedMsg, SkillsSearchResultMsg, SkillReadmeMsg:
+	case LocalSkillsLoadedMsg, GitHubSkillsLoadedMsg, SkillsSearchResultMsg, SkillReadmeMsg,
+		skillsDebounceMsg, skillsGitHubDebounceMsg, AnalyzeExecuteMsg:
 		updated, cmd := a.tabs[TabSkills].Update(msg)
 		a.tabs[TabSkills] = updated
 		return a, cmd
