@@ -114,9 +114,15 @@ func (t SkillsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		t.loading = false
 		t.err = msg.Err
 		t.localSkills = msg.Skills
-		t.skills = msg.Skills
-		t.filtered = msg.Skills
-		t.cursor = 0
+		// If user has an active search with GitHub results, preserve merged view.
+		if len(t.githubSkills) > 0 {
+			t.skills = mergeLocalAndGitHub(msg.Skills, t.githubSkills, t.sortBy)
+			t.applyFilter()
+		} else {
+			t.skills = msg.Skills
+			t.filtered = msg.Skills
+			t.cursor = 0
+		}
 		return t, t.loadReadmeCmd()
 
 	case GitHubSkillsLoadedMsg:
@@ -601,12 +607,22 @@ func (t SkillsTab) renderSkillList(width, height int) string {
 
 	// Show GitHub loading indicator if a fetch is in progress.
 	if t.githubLoading && len(rows) < height {
-		loadingLine := lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render("── GitHub results loading... ──")
+		loadingLine := lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render("── Searching GitHub, registries, npm... ──")
 		rows = append(rows, loadingLine)
 	}
 
 	if len(rows) == 0 {
+		if t.githubLoading {
+			return RenderLoadingState(width, height)
+		}
 		return RenderEmptyState("No skills found", width, height)
+	}
+
+	// Show result count at the bottom if there's room.
+	if len(t.filtered) > height && len(rows) < height {
+		countLine := lipgloss.NewStyle().Foreground(colorDim).
+			Render(fmt.Sprintf("── %d results ──", len(t.filtered)))
+		rows = append(rows, countLine)
 	}
 
 	return strings.Join(rows, "\n")
