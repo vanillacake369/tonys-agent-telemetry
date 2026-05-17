@@ -171,13 +171,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case AutoRefreshMsg:
-		// Trigger a silent re-init of sessions and cost tabs, then schedule next tick.
+		// Only refresh the active tab to avoid unnecessary work on hidden tabs.
 		var cmds []tea.Cmd
-		for tab, m := range a.tabs {
-			if cmd := m.Init(); cmd != nil {
-				a.tabs[tab] = m
-				cmds = append(cmds, cmd)
-			}
+		if cmd := a.tabs[a.activeTab].Init(); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
 		cmds = append(cmds, tea.Tick(autoRefreshInterval, func(time.Time) tea.Msg {
 			return AutoRefreshMsg{}
@@ -264,19 +261,27 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, cmd
 	}
 
-	// Broadcast non-key messages to ALL tabs.
-	// Each tab's Init() fires at App startup, but the resulting messages
-	// (e.g. LocalSkillsLoadedMsg, SessionsLoadedMsg) arrive asynchronously.
-	// They must reach the tab that sent the Init(), not just the active tab.
-	var cmds []tea.Cmd
-	for tab, m := range a.tabs {
-		updated, cmd := m.Update(msg)
-		a.tabs[tab] = updated
-		if cmd != nil {
-			cmds = append(cmds, cmd)
-		}
+	// Route non-key messages to the specific tab that handles them.
+	// This avoids 3x state mutations per message (broadcast anti-pattern).
+	switch msg.(type) {
+	case SessionsLoadedMsg, PreviewLoadedMsg, FileChangesLoadedMsg:
+		updated, cmd := a.tabs[TabSessions].Update(msg)
+		a.tabs[TabSessions] = updated
+		return a, cmd
+	case CostLoadedMsg:
+		updated, cmd := a.tabs[TabCost].Update(msg)
+		a.tabs[TabCost] = updated
+		return a, cmd
+	case LocalSkillsLoadedMsg, GitHubSkillsLoadedMsg, SkillsSearchResultMsg, SkillReadmeMsg:
+		updated, cmd := a.tabs[TabSkills].Update(msg)
+		a.tabs[TabSkills] = updated
+		return a, cmd
+	default:
+		// Unknown messages go to active tab only.
+		updated, cmd := a.tabs[a.activeTab].Update(msg)
+		a.tabs[a.activeTab] = updated
+		return a, cmd
 	}
-	return a, tea.Batch(cmds...)
 }
 
 func (a App) View() string {
