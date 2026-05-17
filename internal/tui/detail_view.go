@@ -31,11 +31,16 @@ type DetailView struct {
 	loading       bool
 	err           error
 	keys          KeyMap
-	pendingG      bool // true when 'g' was pressed, waiting for second key
+	pendingG      bool   // true when 'g' was pressed, waiting for second key
+	verbose       bool   // false=compact (default), true=verbose tool display
+	query         string // search query from session list (for highlight + jump)
+	matchTurns    []int  // indices of turns containing the query
+	matchIdx      int    // current position in matchTurns (for n/N navigation)
 }
 
 // NewDetailView creates a detail view for the given session.
-func NewDetailView(session data.Session, width, height int) DetailView {
+// query is the search term from the session list (empty if opened without search).
+func NewDetailView(session data.Session, width, height int, query string) DetailView {
 	vp := viewport.New(max(1, width-4), max(1, height-6))
 	vp.Style = lipgloss.NewStyle()
 	return DetailView{
@@ -46,6 +51,7 @@ func NewDetailView(session data.Session, width, height int) DetailView {
 		loading:       true,
 		toolCollapsed: make(map[int]bool),
 		keys:          DefaultKeyMap(),
+		query:         query,
 	}
 }
 
@@ -76,6 +82,13 @@ func (d DetailView) Update(msg tea.Msg) (DetailView, tea.Cmd) {
 			}
 		}
 		d.rebuildContent()
+		// Build match index and auto-scroll to first match if query is set.
+		if d.query != "" {
+			d.buildMatchIndex()
+			if len(d.matchTurns) > 0 && len(d.turnLineStart) > d.matchTurns[0] {
+				d.viewport.SetYOffset(d.turnLineStart[d.matchTurns[0]])
+			}
+		}
 		return d, nil
 
 	case tea.KeyMsg:
@@ -96,9 +109,31 @@ func (d DetailView) Update(msg tea.Msg) (DetailView, tea.Cmd) {
 			return d, nil
 
 		case msg.String() == "t":
-			// Toggle tool collapse for the nearest tool turn.
-			d.toggleNearestTool()
+			// Toggle compact/verbose mode.
+			d.verbose = !d.verbose
 			d.rebuildContent()
+			return d, nil
+
+		case msg.String() == "n":
+			// Jump to next match.
+			if len(d.matchTurns) > 0 {
+				d.matchIdx = (d.matchIdx + 1) % len(d.matchTurns)
+				ti := d.matchTurns[d.matchIdx]
+				if ti < len(d.turnLineStart) {
+					d.viewport.SetYOffset(d.turnLineStart[ti])
+				}
+			}
+			return d, nil
+
+		case msg.String() == "N":
+			// Jump to previous match.
+			if len(d.matchTurns) > 0 {
+				d.matchIdx = (d.matchIdx - 1 + len(d.matchTurns)) % len(d.matchTurns)
+				ti := d.matchTurns[d.matchIdx]
+				if ti < len(d.turnLineStart) {
+					d.viewport.SetYOffset(d.turnLineStart[ti])
+				}
+			}
 			return d, nil
 
 		// ── Vim motions ──
@@ -249,9 +284,17 @@ func (d DetailView) renderHeader(width int) string {
 	return headerStyle.Render(line)
 }
 
-// renderFooter renders the bottom hint bar with scroll position.
+// renderFooter renders the bottom hint bar with scroll position and match info.
 func (d DetailView) renderFooter(width int) string {
-	hints := "j/k:scroll  {/}:turn  gg/G:top/bottom  ^d/^u:half-page  t:tools  Esc:close"
+	mode := "compact"
+	if d.verbose {
+		mode = "verbose"
+	}
+	hints := fmt.Sprintf("j/k:scroll  {/}:turn  gg/G:top/end  t:%s  Esc:close", mode)
+	if len(d.matchTurns) > 0 {
+		hints = fmt.Sprintf("n/N:match(%d/%d)  ", d.matchIdx+1, len(d.matchTurns)) + hints
+	}
+
 	scrollPct := ""
 	if d.viewport.TotalLineCount() > 0 {
 		pct := int(d.viewport.ScrollPercent() * 100)
@@ -261,6 +304,12 @@ func (d DetailView) renderFooter(width int) string {
 	footerStyle := lipgloss.NewStyle().
 		Foreground(colorDim).
 		Width(width)
+
+	// Truncate hints if too wide.
+	maxHints := max(10, width-lipgloss.Width(scrollPct)-2)
+	if lipgloss.Width(hints) > maxHints {
+		hints = truncateToWidth(hints, maxHints)
+	}
 
 	gap := max(0, width-lipgloss.Width(hints)-lipgloss.Width(scrollPct))
 	line := hints + strings.Repeat(" ", gap) + scrollPct
@@ -320,7 +369,7 @@ func (d *DetailView) jumpToPrevTurn() {
 	d.viewport.GotoTop()
 }
 
-// renderTurn renders a single turn.
+// renderTurn renders a single turn in compact or verbose mode.
 func (d DetailView) renderTurn(idx int, turn data.DetailTurn, width int) string {
 	var sb strings.Builder
 
@@ -333,20 +382,27 @@ func (d DetailView) renderTurn(idx int, turn data.DetailTurn, width int) string 
 	case "user":
 		roleLabel = roleStyle.Foreground(colorPrimary).Render("[User]")
 	case "assistant":
-		label := "[Assistant]"
-		if turn.Model != "" {
-			label = fmt.Sprintf("[Assistant · %s]", turn.Model)
+		if d.verbose && turn.Model != "" {
+			roleLabel = roleStyle.Foreground(colorSuccess).Render(fmt.Sprintf("[Assistant · %s]", turn.Model))
+		} else {
+			// Compact: short model suffix.
+			suffix := shortModel(turn.Model)
+			if suffix != "" {
+				roleLabel = roleStyle.Foreground(colorSuccess).Render("[Assistant]") +
+					lipgloss.NewStyle().Foreground(colorDim).Render("  "+suffix)
+			} else {
+				roleLabel = roleStyle.Foreground(colorSuccess).Render("[Assistant]")
+			}
 		}
-		roleLabel = roleStyle.Foreground(colorSuccess).Render(label)
 	default:
 		roleLabel = roleStyle.Render("[" + turn.Role + "]")
 	}
 
-	// Token info for assistant turns.
+	// Token info — compact format.
 	var tokenInfo string
 	if turn.TokensIn > 0 || turn.TokensOut > 0 {
 		tokenInfo = lipgloss.NewStyle().Foreground(colorDim).
-			Render(fmt.Sprintf("  in:%d out:%d", turn.TokensIn, turn.TokensOut))
+			Render(fmt.Sprintf("  %s→%s", compactTokens(turn.TokensIn), compactTokens(turn.TokensOut)))
 	}
 
 	sb.WriteString(sepStyle.Render(strings.Repeat("─", min(width, 60))))
@@ -354,25 +410,26 @@ func (d DetailView) renderTurn(idx int, turn data.DetailTurn, width int) string 
 	sb.WriteString(roleLabel + tokenInfo)
 	sb.WriteString("\n")
 
-	// Thinking block (collapsed by default display).
+	// Thinking block — hidden in compact mode, summary in verbose.
 	if turn.Thinking != "" {
-		thinkStyle := lipgloss.NewStyle().Foreground(colorDim).Italic(true)
-		thinkingLines := strings.Count(turn.Thinking, "\n") + 1
-		preview := turn.Thinking
-		if len([]rune(preview)) > 120 {
-			preview = string([]rune(preview)[:120]) + "…"
+		if d.verbose {
+			thinkStyle := lipgloss.NewStyle().Foreground(colorDim).Italic(true)
+			thinkingLines := strings.Count(turn.Thinking, "\n") + 1
+			preview := turn.Thinking
+			if len([]rune(preview)) > 200 {
+				preview = string([]rune(preview)[:200]) + "…"
+			}
+			preview = strings.ReplaceAll(preview, "\n", " ")
+			sb.WriteString(thinkStyle.Render(fmt.Sprintf("  [thinking: %d lines] %s", thinkingLines, preview)))
+			sb.WriteString("\n")
 		}
-		preview = strings.ReplaceAll(preview, "\n", " ")
-		sb.WriteString(thinkStyle.Render(fmt.Sprintf("  [thinking: %d lines] %s", thinkingLines, preview)))
-		sb.WriteString("\n")
+		// Compact: thinking entirely hidden for clean readability.
 	}
 
 	// Main content.
 	if turn.Content != "" {
-		// Wrap long lines to fit viewport width.
 		lines := strings.Split(turn.Content, "\n")
 		for _, line := range lines {
-			// Soft-wrap lines that exceed width.
 			wrapped := softWrap(line, max(10, width-2))
 			sb.WriteString("  " + wrapped + "\n")
 		}
@@ -380,26 +437,19 @@ func (d DetailView) renderTurn(idx int, turn data.DetailTurn, width int) string 
 
 	// Tool calls.
 	if len(turn.ToolCalls) > 0 {
-		collapsed := d.toolCollapsed[idx]
 		toolStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFA500"))
 
-		if collapsed {
-			// Show compact summary.
-			var names []string
-			for _, tc := range turn.ToolCalls {
-				names = append(names, tc.Name)
-			}
-			summary := strings.Join(names, ", ")
-			sb.WriteString(toolStyle.Render(fmt.Sprintf("  [%d tools: %s] (t to expand)", len(turn.ToolCalls), summary)))
+		if !d.verbose {
+			// Compact: one line with Name(key_arg) format.
+			sb.WriteString(toolStyle.Render("  ┊ " + abbreviateTools(turn.ToolCalls)))
 			sb.WriteString("\n")
 		} else {
-			// Show each tool call with input.
+			// Verbose: each tool call with full input.
 			for _, tc := range turn.ToolCalls {
 				sb.WriteString(toolStyle.Render(fmt.Sprintf("  [Tool: %s]", tc.Name)))
 				sb.WriteString("\n")
 				if tc.Input != "" {
 					inputStyle := lipgloss.NewStyle().Foreground(colorDim)
-					// Show truncated input, wrapped.
 					wrapped := softWrap(tc.Input, max(10, width-6))
 					sb.WriteString(inputStyle.Render("    " + wrapped))
 					sb.WriteString("\n")
@@ -411,33 +461,126 @@ func (d DetailView) renderTurn(idx int, turn data.DetailTurn, width int) string 
 	return sb.String()
 }
 
-// toggleNearestTool toggles the collapsed state of the tool block
-// nearest to the current scroll position.
-func (d *DetailView) toggleNearestTool() {
-	// Find turns that have tools.
-	var toolTurns []int
-	for i, t := range d.turns {
-		if len(t.ToolCalls) > 0 {
-			toolTurns = append(toolTurns, i)
+// abbreviateTools creates a compact one-line summary of tool calls.
+// Format: "Bash(go test), Read(main.go), Edit(main.go)"
+func abbreviateTools(tools []data.ToolCall) string {
+	var parts []string
+	for _, tc := range tools {
+		arg := extractKeyArg(tc.Name, tc.Input)
+		if arg != "" {
+			parts = append(parts, fmt.Sprintf("%s(%s)", tc.Name, arg))
+		} else {
+			parts = append(parts, tc.Name)
 		}
 	}
-	if len(toolTurns) == 0 {
-		return
-	}
+	return strings.Join(parts, ", ")
+}
 
-	// Toggle the first one, or if all are in same state, toggle all.
-	// Simple approach: toggle all.
-	allCollapsed := true
-	for _, idx := range toolTurns {
-		if !d.toolCollapsed[idx] {
-			allCollapsed = false
-			break
-		}
+// extractKeyArg pulls the most informative short argument from tool input JSON.
+func extractKeyArg(toolName, input string) string {
+	if input == "" {
+		return ""
 	}
-	for _, idx := range toolTurns {
-		d.toolCollapsed[idx] = !allCollapsed
+	// Quick JSON field extraction without full unmarshal.
+	switch toolName {
+	case "Bash":
+		return extractJSONField(input, "command", 30)
+	case "Read", "Edit", "Write", "MultiEdit":
+		fp := extractJSONField(input, "file_path", 0)
+		if fp != "" {
+			// Show just the filename.
+			parts := strings.Split(fp, "/")
+			return parts[len(parts)-1]
+		}
+		return ""
+	case "Grep":
+		return extractJSONField(input, "pattern", 20)
+	case "Glob":
+		return extractJSONField(input, "pattern", 20)
+	case "Agent":
+		return extractJSONField(input, "description", 25)
+	default:
+		return ""
 	}
 }
+
+// extractJSONField is a lightweight extractor for a single string field from JSON.
+// maxLen of 0 means no truncation.
+func extractJSONField(jsonStr, field string, maxLen int) string {
+	// Look for "field":"value" or "field": "value"
+	key := fmt.Sprintf(`"%s"`, field)
+	idx := strings.Index(jsonStr, key)
+	if idx < 0 {
+		return ""
+	}
+	// Find the colon after the key.
+	rest := jsonStr[idx+len(key):]
+	colonIdx := strings.Index(rest, ":")
+	if colonIdx < 0 {
+		return ""
+	}
+	rest = strings.TrimSpace(rest[colonIdx+1:])
+	if len(rest) == 0 || rest[0] != '"' {
+		return ""
+	}
+	// Find closing quote.
+	end := strings.Index(rest[1:], `"`)
+	if end < 0 {
+		return ""
+	}
+	val := rest[1 : end+1]
+	// Unescape basic sequences.
+	val = strings.ReplaceAll(val, `\"`, `"`)
+	val = strings.ReplaceAll(val, `\\`, `\`)
+	if maxLen > 0 && len([]rune(val)) > maxLen {
+		val = string([]rune(val)[:maxLen]) + "…"
+	}
+	return val
+}
+
+// shortModel returns a compact model name suffix.
+func shortModel(model string) string {
+	if model == "" {
+		return ""
+	}
+	// "claude-opus-4-6" → "opus-4-6"
+	// "claude-sonnet-4-6" → "sonnet-4-6"
+	// "gpt-5" → "gpt-5"
+	parts := strings.Split(model, "-")
+	if len(parts) >= 3 && parts[0] == "claude" {
+		return strings.Join(parts[1:], "-")
+	}
+	return model
+}
+
+// compactTokens formats token count in compact K/M format.
+func compactTokens(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fK", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
+}
+
+// buildMatchIndex finds all turn indices whose content contains the query.
+func (d *DetailView) buildMatchIndex() {
+	d.matchTurns = nil
+	d.matchIdx = 0
+	if d.query == "" {
+		return
+	}
+	lowerQ := strings.ToLower(d.query)
+	for i, turn := range d.turns {
+		text := strings.ToLower(turn.Content + " " + turn.Thinking)
+		if strings.Contains(text, lowerQ) {
+			d.matchTurns = append(d.matchTurns, i)
+		}
+	}
+}
+
 
 // softWrap wraps a single line of text to fit within maxWidth cells.
 func softWrap(s string, maxWidth int) string {

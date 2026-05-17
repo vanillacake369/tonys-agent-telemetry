@@ -34,6 +34,7 @@ type FileChangesLoadedMsg struct {
 // OpenDetailMsg is sent to the App to open a detail overlay.
 type OpenDetailMsg struct {
 	Session data.Session
+	Query   string // search query for highlight + auto-scroll to match
 }
 
 // SessionsTab implements TabModel for the Sessions tab.
@@ -151,7 +152,8 @@ func (s SessionsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		case key.Matches(msg, s.keys.View):
 			if len(s.filtered) > 0 && s.cursor < len(s.filtered) {
 				session := s.filtered[s.cursor]
-				return s, func() tea.Msg { return OpenDetailMsg{Session: session} }
+				query := s.searchInput.Value()
+				return s, func() tea.Msg { return OpenDetailMsg{Session: session, Query: query} }
 			}
 			return s, nil
 

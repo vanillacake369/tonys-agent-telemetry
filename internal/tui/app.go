@@ -182,7 +182,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(cmds...)
 
 	case OpenDetailMsg:
-		dv := NewDetailView(msg.Session, a.width, a.height)
+		dv := NewDetailView(msg.Session, a.width, a.height, msg.Query)
 		a.detailView = &dv
 		return a, dv.Init()
 
