@@ -2,18 +2,19 @@ package data
 
 import "time"
 
-// Session represents metadata extracted from a Claude Code session JSONL file.
+// Session represents metadata extracted from an AI agent session file.
 type Session struct {
 	ID          string
+	Provider    ProviderName  // which agent produced this session
 	ProjectDir  string        // derived from path
 	CWD         string
 	GitBranch   string
 	FirstPrompt string        // first user message (truncated to 100 chars)
 	SearchText  string        // all user messages concatenated (for full-text search)
 	Timestamp   time.Time
-	Model       string        // e.g. "claude-opus-4-6"
+	Model       string        // e.g. "claude-opus-4-6", "gpt-5"
 	Version     string
-	FilePath    string        // absolute path to .jsonl
+	FilePath    string        // absolute path to session file
 	TurnCount   int           // number of user messages
 	Duration    time.Duration // last timestamp - first timestamp
 }

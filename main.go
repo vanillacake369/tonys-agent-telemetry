@@ -51,17 +51,18 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Print(`tonys-agent-telemetry - TUI dashboard for Claude Code
+	fmt.Print(`tonys-agent-telemetry - TUI dashboard for AI coding agents
+
+Supported providers: Claude, Codex (OpenAI), Gemini (Google)
 
 Usage:
   tonys-agent-telemetry              Launch TUI (default: sessions tab)
   tonys-agent-telemetry --version    Print version
   tonys-agent-telemetry --help       Print this help
 
-Tabs (switch with 1/2/3/4):
-  Sessions    Fuzzy-find and resume Claude sessions
-  Agents      Browse and launch agents
-  DAG         Live agent orchestration graph
+Tabs (switch with 1/2/3):
+  Sessions    Browse & resume sessions across all providers (C/X/G badge)
   Skills      Search skill marketplace
+  Cost        Aggregated cost/usage dashboard by provider, model, project
 `)
 }

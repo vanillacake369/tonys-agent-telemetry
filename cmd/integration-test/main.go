@@ -101,6 +101,10 @@ func main() {
 		}
 	}
 
+	// Test 8: Multi-provider discovery
+	fmt.Print("Multi-provider discovery... ")
+	testProviders()
+
 	fmt.Printf("\n=== Results: %d failures ===\n", failed)
 	if failed > 0 {
 		os.Exit(1)

@@ -20,16 +20,26 @@ type modelPricing struct {
 }
 
 // ModelPricing maps model name to USD-per-million-token rates.
-// Source: https://docs.anthropic.com/en/docs/about-claude/models
+// Sources:
+//   https://docs.anthropic.com/en/docs/about-claude/models
+//   https://platform.openai.com/docs/pricing
 var ModelPricing = map[string]modelPricing{
+	// Claude models
 	"claude-opus-4-6":   {InputPerM: 15.0, OutputPerM: 75.0, CacheReadPerM: 1.5, CacheWritePerM: 18.75},
 	"claude-sonnet-4-6": {InputPerM: 3.0, OutputPerM: 15.0, CacheReadPerM: 0.3, CacheWritePerM: 3.75},
 	"claude-haiku-4-5":  {InputPerM: 0.8, OutputPerM: 4.0, CacheReadPerM: 0.08, CacheWritePerM: 1.0},
+	// OpenAI models (Codex uses GPT-5)
+	"gpt-5":            {InputPerM: 2.0, OutputPerM: 8.0, CacheReadPerM: 0.5, CacheWritePerM: 0.0},
+	"gpt-4.1":          {InputPerM: 2.0, OutputPerM: 8.0, CacheReadPerM: 0.5, CacheWritePerM: 0.0},
+	"o3":               {InputPerM: 2.0, OutputPerM: 8.0, CacheReadPerM: 0.5, CacheWritePerM: 0.0},
+	// Gemini models (no token data available, approximate)
+	"gemini-2.5-pro":   {InputPerM: 1.25, OutputPerM: 10.0, CacheReadPerM: 0.315, CacheWritePerM: 0.0},
 }
 
 // SessionCost holds aggregated cost data for one session.
 type SessionCost struct {
 	SessionID    string
+	Provider     ProviderName   // which agent produced this session
 	Project      string
 	Model        string         // primary model used
 	InputTokens  int
@@ -65,8 +75,9 @@ type CostSummary struct {
 	TotalTurns    int
 	TotalDuration time.Duration
 	ByModel       map[string]ModelStats
-	ByProject     map[string]float64 // project → cost
-	ByDay         map[string]float64 // "2006-01-02" → cost
+	ByProvider    map[ProviderName]ModelStats // provider → stats
+	ByProject     map[string]float64         // project → cost
+	ByDay         map[string]float64         // "2006-01-02" → cost
 	TopTools      []ToolStat
 }
 
@@ -241,9 +252,10 @@ func DiscoverAllCosts() ([]SessionCost, error) {
 // Summarize aggregates a slice of SessionCosts into a CostSummary.
 func Summarize(costs []SessionCost) CostSummary {
 	s := CostSummary{
-		ByModel:   make(map[string]ModelStats),
-		ByProject: make(map[string]float64),
-		ByDay:     make(map[string]float64),
+		ByModel:    make(map[string]ModelStats),
+		ByProvider: make(map[ProviderName]ModelStats),
+		ByProject:  make(map[string]float64),
+		ByDay:      make(map[string]float64),
 	}
 
 	toolCounts := make(map[string]int)
@@ -261,6 +273,13 @@ func Summarize(costs []SessionCost) CostSummary {
 		ms.Cost += c.EstCostUSD
 		ms.Turns += c.TurnCount
 		s.ByModel[c.Model] = ms
+
+		// Aggregate by provider.
+		ps := s.ByProvider[c.Provider]
+		ps.Tokens += c.TotalTokens
+		ps.Cost += c.EstCostUSD
+		ps.Turns += c.TurnCount
+		s.ByProvider[c.Provider] = ps
 
 		// Aggregate by project.
 		s.ByProject[c.Project] += c.EstCostUSD
