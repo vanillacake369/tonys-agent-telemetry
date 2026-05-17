@@ -202,6 +202,95 @@ func buildRefinedRepoQuery(query string) string {
 	return fmt.Sprintf("claude skill %s", query)
 }
 
+// ghCodeSearchResultV2 matches the actual output of `gh search code --json repository,path`.
+type ghCodeSearchResultV2 struct {
+	Path       string `json:"path"`
+	Repository struct {
+		NameWithOwner string `json:"nameWithOwner"`
+		URL           string `json:"url"`
+		IsPrivate     bool   `json:"isPrivate"`
+	} `json:"repository"`
+}
+
+// SearchGitHubCode uses `gh search code --filename SKILL.md` to find repos
+// containing Claude Code skills. Filters by "claude" keyword in file content
+// to reduce false positives.
+func SearchGitHubCode(ctx context.Context, query string, limit int) ([]Skill, error) {
+	if _, err := exec.LookPath("gh"); err != nil {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 30
+	}
+
+	// Search for SKILL.md files containing "claude".
+	searchQuery := "claude"
+	if query != "" {
+		searchQuery = fmt.Sprintf("claude %s", query)
+	}
+
+	args := []string{
+		"search", "code",
+		searchQuery,
+		"--filename", "SKILL.md",
+		"--limit", fmt.Sprintf("%d", limit),
+		"--json", "repository,path",
+	}
+
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, nil
+		}
+		log.Printf("skill: gh search code failed: %v", err)
+		return nil, nil
+	}
+
+	var results []ghCodeSearchResultV2
+	if err := json.Unmarshal(out, &results); err != nil {
+		log.Printf("skill: parsing gh search code: %v", err)
+		return nil, nil
+	}
+
+	// Deduplicate by repo.
+	seen := make(map[string]bool)
+	var skills []Skill
+	for _, r := range results {
+		if r.Repository.IsPrivate {
+			continue
+		}
+		repoKey := r.Repository.NameWithOwner
+		if seen[repoKey] {
+			continue
+		}
+		seen[repoKey] = true
+
+		repoURL := r.Repository.URL
+		if repoURL == "" {
+			repoURL = fmt.Sprintf("https://github.com/%s", repoKey)
+		}
+
+		// Derive skill name from path.
+		name := repoKey
+		parts := strings.Split(r.Path, "/")
+		if len(parts) >= 2 {
+			// Use parent dir of SKILL.md as name.
+			name = parts[len(parts)-2]
+		}
+
+		skills = append(skills, Skill{
+			Name:        name,
+			Description: fmt.Sprintf("Found in %s", repoKey),
+			Source:      SourceGitHub,
+			URL:         repoURL,
+			ReadmeURL:   fmt.Sprintf("%s/blob/main/%s", repoURL, r.Path),
+		})
+	}
+
+	return skills, nil
+}
+
 // deduplicateCodeResults returns one entry per unique repository FullName.
 func deduplicateCodeResults(results []ghCodeSearchResult) []ghCodeSearchResult {
 	seen := make(map[string]bool, len(results))

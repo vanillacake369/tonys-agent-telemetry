@@ -56,10 +56,10 @@ func (f *Fetcher) SearchRemote(ctx context.Context, query string, sortBy SortBy)
 		err    error
 	}
 
-	const numSources = 4
+	const numSources = 5
 	ch := make(chan result, numSources)
 
-	// GitHub (primary + fallback).
+	// GitHub repo search.
 	go func() {
 		s, e := SearchGitHub(ctx, query, sortByToGHSort(sortBy), 30)
 		ch <- result{s, e}
@@ -77,9 +77,15 @@ func (f *Fetcher) SearchRemote(ctx context.Context, query string, sortBy SortBy)
 		ch <- result{s, e}
 	}()
 
-	// Skill registries (monorepos like mattpocock/skills).
+	// Skill registries (monorepos).
 	go func() {
 		s, e := SearchRegistries(ctx, query)
+		ch <- result{s, e}
+	}()
+
+	// Code search (SKILL.md files).
+	go func() {
+		s, e := SearchGitHubCode(ctx, query, 30)
 		ch <- result{s, e}
 	}()
 
@@ -153,15 +159,15 @@ func (f *Fetcher) Search(ctx context.Context, query string, sortBy SortBy) ([]Sk
 	return merged, nil
 }
 
-// fetchRemoteAll fetches from GitHub, npm, awesome-lists, and skill registries concurrently.
-// A single source failure does not block the others.
+// fetchRemoteAll fetches from GitHub, npm, awesome-lists, skill registries,
+// and code search concurrently. A single source failure does not block the others.
 func (f *Fetcher) fetchRemoteAll(ctx context.Context, query string, sortBy SortBy) ([]Skill, error) {
 	type result struct {
 		skills []Skill
 		err    error
 	}
 
-	const numSources = 4
+	const numSources = 5
 	ch := make(chan result, numSources)
 
 	go func() {
@@ -181,6 +187,11 @@ func (f *Fetcher) fetchRemoteAll(ctx context.Context, query string, sortBy SortB
 
 	go func() {
 		s, e := SearchRegistries(ctx, query)
+		ch <- result{s, e}
+	}()
+
+	go func() {
+		s, e := SearchGitHubCode(ctx, query, 30)
 		ch <- result{s, e}
 	}()
 
