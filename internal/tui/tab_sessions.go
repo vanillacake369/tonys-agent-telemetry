@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/sahilm/fuzzy"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/data"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/platform"
 )
@@ -187,29 +186,26 @@ func (s SessionsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 	return s, tea.Batch(cmds...)
 }
 
-// applyFilter applies fuzzy filtering to sessions based on current search input.
+// applyFilter uses case-insensitive substring match across all session content.
+// Fuzzy matching is too loose on long SearchText (2KB) — substring is more precise.
 func (s *SessionsTab) applyFilter() {
-	query := s.searchInput.Value()
+	query := strings.ToLower(s.searchInput.Value())
 	if query == "" {
 		s.filtered = s.sessions
 		return
 	}
 
-	// Build search targets from ALL user messages + metadata.
-	targets := make([]string, len(s.sessions))
-	for i, sess := range s.sessions {
-		targets[i] = strings.Join([]string{
-			sess.SearchText, // all user messages concatenated
+	filtered := make([]data.Session, 0)
+	for _, sess := range s.sessions {
+		target := strings.ToLower(strings.Join([]string{
+			sess.SearchText,
 			sess.CWD,
 			sess.GitBranch,
 			sess.Model,
-		}, " ")
-	}
-
-	matches := fuzzy.Find(query, targets)
-	filtered := make([]data.Session, 0, len(matches))
-	for _, m := range matches {
-		filtered = append(filtered, s.sessions[m.Index])
+		}, " "))
+		if strings.Contains(target, query) {
+			filtered = append(filtered, sess)
+		}
 	}
 	s.filtered = filtered
 }
