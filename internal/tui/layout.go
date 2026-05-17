@@ -292,20 +292,30 @@ func PadToWidth(text string, targetWidth int) string {
 	return text + strings.Repeat(" ", targetWidth-currentWidth)
 }
 
-// truncateToWidth truncates a rune slice to at most maxWidth visible characters,
+// truncateToWidth truncates a string to at most maxWidth display cells,
 // appending "…" when the string is shortened.
+// Uses lipgloss.Width() to correctly account for CJK double-width characters.
 func truncateToWidth(s string, maxWidth int) string {
 	if maxWidth <= 0 {
 		return ""
 	}
-	runes := []rune(s)
-	if len(runes) <= maxWidth {
+	if lipgloss.Width(s) <= maxWidth {
 		return s
 	}
 	if maxWidth <= 1 {
 		return "…"
 	}
-	return string(runes[:maxWidth-1]) + "…"
+	// Walk runes, accumulating display width.
+	runes := []rune(s)
+	width := 0
+	for i, r := range runes {
+		rw := lipgloss.Width(string(r))
+		if width+rw > maxWidth-1 { // -1 for "…"
+			return string(runes[:i]) + "…"
+		}
+		width += rw
+	}
+	return s
 }
 
 // wrapLines wraps/truncates a multi-line string so each line fits in width,

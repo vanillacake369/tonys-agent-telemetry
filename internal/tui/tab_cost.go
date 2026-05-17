@@ -45,10 +45,10 @@ func NewCostTab() CostTab {
 	}
 }
 
-// Init loads cost data asynchronously.
+// Init loads cost data asynchronously from all providers.
 func (c CostTab) Init() tea.Cmd {
 	return func() tea.Msg {
-		costs, err := data.DiscoverAllCosts()
+		costs, err := data.DiscoverAllCostsMulti()
 		if err != nil {
 			return CostLoadedMsg{Err: err}
 		}
@@ -140,6 +140,12 @@ func (c CostTab) renderDashboard(width int) string {
 	sb.WriteString(renderSummaryRow(s, width))
 	sb.WriteString("\n\n")
 
+	// ── By Provider ──
+	sb.WriteString(renderSectionHeader("By Provider", width))
+	sb.WriteString("\n")
+	sb.WriteString(renderProviderSection(s, width))
+	sb.WriteString("\n\n")
+
 	// ── By Model ──
 	sb.WriteString(renderSectionHeader("By Model", width))
 	sb.WriteString("\n")
@@ -190,6 +196,56 @@ func renderSectionHeader(title string, width int) string {
 		Foreground(colorPrimary).
 		Width(width).
 		Render(title + ":")
+}
+
+// renderProviderSection renders per-provider bars and stats.
+func renderProviderSection(s data.CostSummary, width int) string {
+	if len(s.ByProvider) == 0 {
+		return lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render("  no data")
+	}
+
+	type entry struct {
+		name string
+		ms   data.ModelStats
+	}
+	var entries []entry
+	for name, ms := range s.ByProvider {
+		label := string(name)
+		switch name {
+		case data.ProviderClaude:
+			label = "Claude"
+		case data.ProviderCodex:
+			label = "Codex"
+		case data.ProviderGemini:
+			label = "Gemini"
+		}
+		entries = append(entries, entry{label, ms})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].ms.Cost > entries[j].ms.Cost
+	})
+
+	maxCost := entries[0].ms.Cost
+	if maxCost == 0 {
+		maxCost = 1
+	}
+
+	const barWidth = 20
+	const nameWidth = 10
+	var lines []string
+	for _, e := range entries {
+		pct := 0.0
+		if s.TotalCostUSD > 0 {
+			pct = e.ms.Cost / s.TotalCostUSD * 100
+		}
+		bar := renderBar(e.ms.Cost, maxCost, barWidth)
+		tok := formatTokenCount(e.ms.Tokens)
+		nameCol := PadToWidth(e.name, nameWidth)
+		line := fmt.Sprintf("  %s %s  $%.2f (%3.0f%%)  %s tok  %d turns",
+			nameCol, bar, e.ms.Cost, pct, tok, e.ms.Turns)
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // renderModelSection renders per-model bars and stats.

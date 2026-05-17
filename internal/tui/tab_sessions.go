@@ -31,6 +31,11 @@ type FileChangesLoadedMsg struct {
 	Err     error
 }
 
+// OpenDetailMsg is sent to the App to open a detail overlay.
+type OpenDetailMsg struct {
+	Session data.Session
+}
+
 // SessionsTab implements TabModel for the Sessions tab.
 type SessionsTab struct {
 	sessions    []data.Session
@@ -60,10 +65,10 @@ func NewSessionsTab() SessionsTab {
 	}
 }
 
-// Init loads sessions asynchronously.
+// Init loads sessions asynchronously from all providers.
 func (s SessionsTab) Init() tea.Cmd {
 	return func() tea.Msg {
-		sessions, err := data.DiscoverSessions()
+		sessions, err := data.DiscoverAllSessions()
 		return SessionsLoadedMsg{Sessions: sessions, Err: err}
 	}
 }
@@ -136,18 +141,27 @@ func (s SessionsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 			s.cursor = 0
 			return s, s.Init()
 
+		case key.Matches(msg, s.keys.View):
+			if len(s.filtered) > 0 && s.cursor < len(s.filtered) {
+				session := s.filtered[s.cursor]
+				return s, func() tea.Msg { return OpenDetailMsg{Session: session} }
+			}
+			return s, nil
+
 		case key.Matches(msg, s.keys.Enter):
 			if len(s.filtered) > 0 && s.cursor < len(s.filtered) {
 				session := s.filtered[s.cursor]
-				cmd := fmt.Sprintf("cd %q && claude --resume %s", session.CWD, session.ID)
-				_ = platform.Detect().OpenPane(cmd)
+				if p := data.GetProvider(session.Provider); p != nil {
+					cmd := p.ResumeCommand(session)
+					_ = platform.Detect().OpenPane(cmd)
+				}
 			}
 			return s, nil
 
 		case key.Matches(msg, s.keys.Fork):
 			if len(s.filtered) > 0 && s.cursor < len(s.filtered) {
 				session := s.filtered[s.cursor]
-				cmd := fmt.Sprintf("cd %q && claude --resume %s --fork-session", session.CWD, session.ID)
+				cmd := resumeForkCommand(session)
 				_ = platform.Detect().OpenPane(cmd)
 			}
 			return s, nil
@@ -210,15 +224,39 @@ func (s *SessionsTab) applyFilter() {
 	s.filtered = filtered
 }
 
+// resumeForkCommand returns the fork/new-session command based on provider.
+func resumeForkCommand(session data.Session) string {
+	cwd := session.CWD
+	cdPrefix := ""
+	if cwd != "" {
+		cdPrefix = fmt.Sprintf("cd %q && ", cwd)
+	}
+	switch session.Provider {
+	case data.ProviderClaude:
+		return cdPrefix + fmt.Sprintf("claude --resume %s --fork-session", session.ID)
+	case data.ProviderCodex:
+		return cdPrefix + fmt.Sprintf("codex fork %s", session.ID)
+	case data.ProviderGemini:
+		// Gemini doesn't have fork; just start a new session in same dir.
+		return cdPrefix + "gemini"
+	default:
+		return cdPrefix + "echo 'unknown provider'"
+	}
+}
+
 // loadPreviewCmd returns a tea.Cmd that loads the conversation preview for the
 // currently selected session. Returns nil when there is no selected session.
 func (s SessionsTab) loadPreviewCmd() tea.Cmd {
 	if len(s.filtered) == 0 || s.cursor >= len(s.filtered) {
 		return nil
 	}
-	filePath := s.filtered[s.cursor].FilePath
+	session := s.filtered[s.cursor]
 	return func() tea.Msg {
-		turns, err := data.ParseConversationPreview(filePath, 5)
+		p := data.GetProvider(session.Provider)
+		if p == nil {
+			return PreviewLoadedMsg{Err: fmt.Errorf("unknown provider")}
+		}
+		turns, err := p.ParseConversationPreview(session.FilePath, 5)
 		return PreviewLoadedMsg{Turns: turns, Err: err}
 	}
 }
@@ -229,9 +267,13 @@ func (s SessionsTab) loadFileChangesCmd() tea.Cmd {
 	if len(s.filtered) == 0 || s.cursor >= len(s.filtered) {
 		return nil
 	}
-	filePath := s.filtered[s.cursor].FilePath
+	session := s.filtered[s.cursor]
 	return func() tea.Msg {
-		changes, err := data.ParseFileChanges(filePath)
+		p := data.GetProvider(session.Provider)
+		if p == nil {
+			return FileChangesLoadedMsg{Err: fmt.Errorf("unknown provider")}
+		}
+		changes, err := p.ParseFileChanges(session.FilePath)
 		return FileChangesLoadedMsg{Changes: changes, Err: err}
 	}
 }
@@ -300,24 +342,31 @@ func (s SessionsTab) renderSessionListWithSearch(width, height int) string {
 
 // renderColumnHeader renders a btop/k9s-style column header row.
 // Column widths must match those used in formatSessionLine (SSoT).
+// The " ▸ " cursor prefix is 3 chars, added by RenderListItem outside formatSessionLine.
 func (s SessionsTab) renderColumnHeader(width int) string {
 	headerStyle := lipgloss.NewStyle().
 		Foreground(colorPrimary).
 		Bold(true)
 	dimSep := lipgloss.NewStyle().Foreground(colorDim)
 
+	// 3-char cursor prefix + content columns must align.
+	const cursor = "   " // matches RenderListItem's "   " indent
+	const srcW = 7       // matches formatSessionLine's srcW
+
 	if width < 35 {
-		return headerStyle.Render("   PROMPT")
+		return headerStyle.Render(cursor + PadToWidth("SRC", srcW) + "PROMPT")
 	}
 	if width < 50 {
-		return headerStyle.Render("   " + PadToWidth("DATE", 12) + "PROMPT")
+		return headerStyle.Render(cursor + PadToWidth("SRC", srcW) + PadToWidth("DATE", 12) + "PROMPT")
 	}
-	// Wide: same column widths as formatSessionLine wide mode.
-	dateH := PadToWidth("DATE", 12)
-	projH := PadToWidth("PROJECT", 13) // 12 data + 1 separator space
-	statsH := PadToWidth("T  DUR", 8)
-	promptH := "PROMPT"
-	return headerStyle.Render("   "+dateH+projH+statsH+promptH) +
+	// Wide: SRC(7) + date(12) + project(13) + stats(8) + prompt
+	header := cursor +
+		PadToWidth("SRC", srcW) +
+		PadToWidth("DATE", 12) +
+		PadToWidth("PROJECT", 13) +
+		PadToWidth("T  DUR", 8) +
+		"PROMPT"
+	return headerStyle.Render(header) +
 		"\n" + dimSep.Render(strings.Repeat("─", min(width, 80)))
 }
 
@@ -350,6 +399,21 @@ func (s SessionsTab) renderSessionList(width, height int) string {
 	return strings.Join(rows, "\n")
 }
 
+// providerLabel returns a fixed-width display label for the session's provider.
+// All labels are exactly 6 chars wide for column alignment.
+func providerLabel(p data.ProviderName) string {
+	switch p {
+	case data.ProviderClaude:
+		return "Claude"
+	case data.ProviderCodex:
+		return "Codex "
+	case data.ProviderGemini:
+		return "Gemini"
+	default:
+		return "      "
+	}
+}
+
 // formatSessionLine formats a single session entry with responsive column widths.
 // Uses PadToWidth for CJK-safe alignment (double-width chars = 2 cells).
 // Narrow (<35): prompt only. Medium (<50): date + prompt. Wide: date + project + stats + prompt.
@@ -361,6 +425,7 @@ func (s SessionsTab) formatSessionLine(sess data.Session, maxWidth int) string {
 	if project == "" || project == "." {
 		project = filepath.Base(sess.ProjectDir)
 	}
+	srcLabel := providerLabel(sess.Provider)
 
 	// Determine which text to display as the prompt column.
 	prompt := strings.ReplaceAll(sess.FirstPrompt, "\n", " ")
@@ -373,22 +438,28 @@ func (s SessionsTab) formatSessionLine(sess data.Session, maxWidth int) string {
 		}
 	}
 
+	// trunc cuts plain text to w runes — NO ANSI escape sequences.
+	// formatSessionLine must return plain text so HighlightMatch works correctly.
 	trunc := func(str string, w int) string {
-		return lipgloss.NewStyle().MaxWidth(w).Render(str)
+		return truncateToWidth(str, w)
 	}
 
+	// All modes include SRC(7) column: 6-char label + 1 space.
+	const srcW = 7
+
 	if maxWidth < 35 {
-		return trunc(prompt, maxWidth)
+		remaining := max(1, maxWidth-srcW)
+		return PadToWidth(srcLabel, srcW) + trunc(prompt, remaining)
 	}
 
 	if maxWidth < 50 {
-		// Medium: date(12) + prompt(remaining)
+		// Medium: SRC(7) + date(12) + prompt(remaining)
 		dateCol := PadToWidth(timestamp, 12)
-		remaining := max(1, maxWidth-lipgloss.Width(dateCol))
-		return dateCol + trunc(prompt, remaining)
+		remaining := max(1, maxWidth-srcW-12)
+		return PadToWidth(srcLabel, srcW) + dateCol + trunc(prompt, remaining)
 	}
 
-	// Wide: date(12) + project(12+1 space) + stats(8) + prompt(remaining)
+	// Wide: SRC(7) + date(12) + project(13) + stats(8) + prompt(remaining)
 	dateCol := PadToWidth(timestamp, 12)
 	projCol := PadToWidth(trunc(project, 12), 13) // 12 data + 1 separator space
 
@@ -400,7 +471,7 @@ func (s SessionsTab) formatSessionLine(sess data.Session, maxWidth int) string {
 	}
 	statsCol := PadToWidth(trunc(statsRaw, 8), 8)
 
-	prefix := dateCol + projCol + statsCol
+	prefix := PadToWidth(srcLabel, srcW) + dateCol + projCol + statsCol
 	prefixWidth := lipgloss.Width(prefix)
 	remaining := max(1, maxWidth-prefixWidth)
 	return prefix + trunc(prompt, remaining)
