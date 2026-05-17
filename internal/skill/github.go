@@ -61,7 +61,7 @@ type ghRepoMeta struct {
 // Returns empty slice (not error) when gh is not installed or not authenticated.
 func SearchGitHub(ctx context.Context, query string, sort string, limit int) ([]Skill, error) {
 	if limit <= 0 {
-		limit = 30
+		limit = 100
 	}
 	if sort == "" {
 		sort = "stars"

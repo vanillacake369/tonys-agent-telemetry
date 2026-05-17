@@ -61,7 +61,7 @@ func (f *Fetcher) SearchRemote(ctx context.Context, query string, sortBy SortBy)
 
 	// GitHub repo search.
 	go func() {
-		s, e := SearchGitHub(ctx, query, sortByToGHSort(sortBy), 30)
+		s, e := SearchGitHub(ctx, query, sortByToGHSort(sortBy), 100)
 		ch <- result{s, e}
 	}()
 
@@ -85,7 +85,7 @@ func (f *Fetcher) SearchRemote(ctx context.Context, query string, sortBy SortBy)
 
 	// Code search (SKILL.md files).
 	go func() {
-		s, e := SearchGitHubCode(ctx, query, 30)
+		s, e := SearchGitHubCode(ctx, query, 100)
 		ch <- result{s, e}
 	}()
 
@@ -171,7 +171,7 @@ func (f *Fetcher) fetchRemoteAll(ctx context.Context, query string, sortBy SortB
 	ch := make(chan result, numSources)
 
 	go func() {
-		s, e := SearchGitHub(ctx, query, sortByToGHSort(sortBy), 30)
+		s, e := SearchGitHub(ctx, query, sortByToGHSort(sortBy), 100)
 		ch <- result{s, e}
 	}()
 
@@ -191,7 +191,7 @@ func (f *Fetcher) fetchRemoteAll(ctx context.Context, query string, sortBy SortB
 	}()
 
 	go func() {
-		s, e := SearchGitHubCode(ctx, query, 30)
+		s, e := SearchGitHubCode(ctx, query, 100)
 		ch <- result{s, e}
 	}()
 
