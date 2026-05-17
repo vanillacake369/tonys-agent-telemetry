@@ -19,6 +19,7 @@ type KeyMap struct {
 
 	// Actions (single-key, only when search is unfocused)
 	Enter   key.Binding // "enter"
+	View    key.Binding // "v" → open detail overlay
 	Copy    key.Binding // "y"
 	Refresh key.Binding // "r"
 	Fork    key.Binding // "f"
@@ -72,6 +73,10 @@ func DefaultKeyMap() KeyMap {
 		Enter: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "select"),
+		),
+		View: key.NewBinding(
+			key.WithKeys("v"),
+			key.WithHelp("v", "view detail"),
 		),
 		Copy: key.NewBinding(
 			key.WithKeys("y"),

@@ -65,6 +65,24 @@ type Turn struct {
 	Content string // truncated text
 }
 
+// DetailTurn is a full-fidelity turn for the detail view.
+type DetailTurn struct {
+	Role       string     // "user", "assistant", "system"
+	Content    string     // full text content
+	Thinking   string     // thinking block content (assistant only)
+	ToolCalls  []ToolCall // tool invocations (assistant only)
+	Model      string     // model used (assistant only)
+	TokensIn   int        // input tokens (assistant only)
+	TokensOut  int        // output tokens (assistant only)
+	Timestamp  string     // original timestamp
+}
+
+// ToolCall represents a single tool invocation within a turn.
+type ToolCall struct {
+	Name  string // e.g. "Bash", "Read", "Edit"
+	Input string // truncated input/arguments
+}
+
 const maxFirstPromptLen = 100
 const thinkingPlaceholder = "[thinking...]"
 
@@ -278,6 +296,92 @@ func ParseConversationPreview(filepath string, maxTurns int) ([]Turn, error) {
 		})
 	}
 	// Ignore scanner.Err() for truncated-line tolerance.
+
+	return turns, nil
+}
+
+// ParseFullConversation reads a Claude session JSONL and returns all turns
+// with full content, thinking blocks, and tool calls.
+func ParseFullConversation(filepath string) ([]DetailTurn, error) {
+	f, err := os.Open(filepath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	const maxToolInputLen = 200
+	var turns []DetailTurn
+	scanner := bufio.NewScanner(f)
+	buf := make([]byte, 1<<20)
+	scanner.Buffer(buf, 1<<20)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var msg rawMessage
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			continue
+		}
+		if msg.Type != "user" && msg.Type != "assistant" {
+			continue
+		}
+		if msg.Message == nil {
+			continue
+		}
+
+		dt := DetailTurn{
+			Role:      msg.Type,
+			Timestamp: msg.Timestamp,
+		}
+
+		if msg.Type == "assistant" && msg.Message.Model != "" {
+			dt.Model = msg.Message.Model
+		}
+		if msg.Type == "assistant" && msg.Message.Usage != nil {
+			dt.TokensIn = msg.Message.Usage.InputTokens
+			dt.TokensOut = msg.Message.Usage.OutputTokens
+		}
+
+		// Parse content blocks.
+		var blocks []rawContentBlock
+		if err := json.Unmarshal(msg.Message.Content, &blocks); err == nil {
+			var textParts []string
+			for _, b := range blocks {
+				switch b.Type {
+				case "text":
+					if b.Text != "" {
+						textParts = append(textParts, b.Text)
+					}
+				case "thinking":
+					if b.Thinking != "" {
+						dt.Thinking = b.Thinking
+					}
+				case "tool_use":
+					tc := ToolCall{Name: b.Name}
+					if len(b.Input) > 0 {
+						inputStr := string(b.Input)
+						if len(inputStr) > maxToolInputLen {
+							inputStr = inputStr[:maxToolInputLen] + "…"
+						}
+						tc.Input = inputStr
+					}
+					dt.ToolCalls = append(dt.ToolCalls, tc)
+				}
+			}
+			dt.Content = strings.Join(textParts, "\n")
+		} else {
+			// Content is a plain string.
+			dt.Content = extractTextFromContent(msg.Message.Content, false)
+		}
+
+		if dt.Content == "" && dt.Thinking == "" && len(dt.ToolCalls) == 0 {
+			continue
+		}
+
+		turns = append(turns, dt)
+	}
 
 	return turns, nil
 }

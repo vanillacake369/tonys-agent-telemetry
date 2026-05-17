@@ -4,12 +4,19 @@ import (
 	"context"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/event"
 )
+
+// autoRefreshInterval is the period between automatic data refreshes.
+const autoRefreshInterval = 30 * time.Second
+
+// AutoRefreshMsg triggers a background refresh of session/cost data.
+type AutoRefreshMsg struct{}
 
 // Tab represents the active tab in the TUI.
 type Tab int
@@ -55,6 +62,7 @@ type App struct {
 	height        int
 	searchFocused bool // when true, key events pass directly to the active tab
 	whichKey      WhichKeyOverlay
+	detailView    *DetailView // non-nil when detail overlay is open
 	fifoEvents    <-chan event.Event // nil when FIFO is not active
 	fifoCancel    context.CancelFunc
 }
@@ -100,10 +108,46 @@ func (a App) Init() tea.Cmd {
 		cmds = append(cmds, event.ListenForEvents(ctx, a.fifoEvents))
 	}
 
+	// Start auto-refresh polling.
+	cmds = append(cmds, tea.Tick(autoRefreshInterval, func(time.Time) tea.Msg {
+		return AutoRefreshMsg{}
+	}))
+
 	return tea.Batch(cmds...)
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// ── Detail overlay intercepts everything when open ──
+	if a.detailView != nil {
+		switch msg := msg.(type) {
+		case tea.WindowSizeMsg:
+			a.width = msg.Width
+			a.height = msg.Height
+			a = a.propagateSize()
+			a.detailView.SetSize(a.width, a.height)
+			return a, nil
+		case tea.KeyMsg:
+			if msg.Type == tea.KeyCtrlC {
+				return a, tea.Quit
+			}
+			if key.Matches(msg, a.keys.Escape) || key.Matches(msg, a.keys.Quit) {
+				a.detailView = nil
+				return a, nil
+			}
+			dv, cmd := a.detailView.Update(msg)
+			a.detailView = &dv
+			return a, cmd
+		case DetailLoadedMsg:
+			dv, cmd := a.detailView.Update(msg)
+			a.detailView = &dv
+			return a, cmd
+		default:
+			dv, cmd := a.detailView.Update(msg)
+			a.detailView = &dv
+			return a, cmd
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
@@ -125,6 +169,25 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// FIFO channel closed — stop subscribing.
 		a.fifoEvents = nil
 		return a, nil
+
+	case AutoRefreshMsg:
+		// Trigger a silent re-init of sessions and cost tabs, then schedule next tick.
+		var cmds []tea.Cmd
+		for tab, m := range a.tabs {
+			if cmd := m.Init(); cmd != nil {
+				a.tabs[tab] = m
+				cmds = append(cmds, cmd)
+			}
+		}
+		cmds = append(cmds, tea.Tick(autoRefreshInterval, func(time.Time) tea.Msg {
+			return AutoRefreshMsg{}
+		}))
+		return a, tea.Batch(cmds...)
+
+	case OpenDetailMsg:
+		dv := NewDetailView(msg.Session, a.width, a.height)
+		a.detailView = &dv
+		return a, dv.Init()
 
 	case tea.KeyMsg:
 		// Ctrl+C always quits, even when overlay or search is active.
@@ -244,6 +307,11 @@ func (a App) View() string {
 		Width(innerW).
 		Render(inner)
 
+	// Render the detail overlay on top of everything.
+	if a.detailView != nil {
+		return a.detailView.View()
+	}
+
 	// Render the which-key overlay centered on top of the full view.
 	if a.whichKey.visible {
 		a.whichKey.width = a.width
@@ -284,7 +352,7 @@ func (a App) propagateSize() App {
 func (a App) tabHints() string {
 	switch a.activeTab {
 	case TabSessions:
-		return "↵:resume  f:fork  y:copy  r:refresh"
+		return "v:view  ↵:resume  f:fork  y:copy  r:refresh"
 	case TabSkills:
 		return "↵:analyze  o:open  s:sort  y:copy  r:refresh"
 	case TabCost:
