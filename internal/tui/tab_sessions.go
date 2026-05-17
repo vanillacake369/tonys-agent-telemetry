@@ -481,14 +481,17 @@ func (s SessionsTab) formatSessionLine(sess data.Session, maxWidth int) string {
 }
 
 // findMatchContext finds query in text and returns the surrounding context
-// centered on the match, up to maxLen characters.
+// centered on the match, up to maxLen runes. Uses rune-based indexing
+// to avoid splitting multi-byte CJK characters.
 func findMatchContext(text, query string, maxLen int) string {
 	if text == "" || query == "" || maxLen <= 0 {
 		return ""
 	}
-	lower := strings.ToLower(text)
-	lowerQ := strings.ToLower(query)
-	idx := strings.Index(lower, lowerQ)
+	runes := []rune(text)
+	lowerRunes := []rune(strings.ToLower(text))
+	queryRunes := []rune(strings.ToLower(query))
+
+	idx := runeIndex(lowerRunes, queryRunes)
 	if idx < 0 {
 		return ""
 	}
@@ -498,10 +501,10 @@ func findMatchContext(text, query string, maxLen int) string {
 		start = 0
 	}
 	end := start + maxLen
-	if end > len(text) {
-		end = len(text)
+	if end > len(runes) {
+		end = len(runes)
 	}
-	return text[start:end]
+	return string(runes[start:end])
 }
 
 // renderPreview renders the right panel with the conversation preview and file changes.

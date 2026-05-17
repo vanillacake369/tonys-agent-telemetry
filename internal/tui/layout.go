@@ -250,32 +250,73 @@ func renderErrorState(err error, width int) string {
 // query is the search term (case-insensitive match).
 // Matched portions get bold + a gold highlight color; rest stays in baseStyle.
 // When query is empty the full text is rendered with baseStyle unchanged.
+//
+// Uses rune-based indexing to safely handle CJK/multi-byte characters.
 func HighlightMatch(text, query string, baseStyle lipgloss.Style) string {
 	if query == "" {
 		return baseStyle.Render(text)
 	}
-	lower := strings.ToLower(text)
-	lowerQ := strings.ToLower(query)
+
+	textRunes := []rune(text)
+	queryRunes := []rune(strings.ToLower(query))
+	lowerRunes := []rune(strings.ToLower(text))
+	queryLen := len(queryRunes)
+
+	if queryLen == 0 {
+		return baseStyle.Render(text)
+	}
 
 	highlightStyle := baseStyle.Bold(true).Foreground(lipgloss.Color("#FFD700"))
 
 	var result strings.Builder
 	pos := 0
-	for {
-		idx := strings.Index(lower[pos:], lowerQ)
+	for pos <= len(lowerRunes)-queryLen {
+		// Find next match in rune slice.
+		idx := runeIndex(lowerRunes[pos:], queryRunes)
 		if idx < 0 {
-			result.WriteString(baseStyle.Render(text[pos:]))
+			result.WriteString(baseStyle.Render(string(textRunes[pos:])))
 			break
 		}
-		// Before match
+		// Before match.
 		if idx > 0 {
-			result.WriteString(baseStyle.Render(text[pos : pos+idx]))
+			result.WriteString(baseStyle.Render(string(textRunes[pos : pos+idx])))
 		}
-		// Match
-		result.WriteString(highlightStyle.Render(text[pos+idx : pos+idx+len(lowerQ)]))
-		pos += idx + len(lowerQ)
+		// Match.
+		result.WriteString(highlightStyle.Render(string(textRunes[pos+idx : pos+idx+queryLen])))
+		pos += idx + queryLen
+	}
+	if pos < len(textRunes) && pos > 0 {
+		// Remaining text after last match attempt.
+		remaining := string(textRunes[pos:])
+		if !strings.Contains(result.String(), remaining) {
+			// Only add if not already captured by the idx < 0 break above.
+		}
 	}
 	return result.String()
+}
+
+// runeIndex finds the first occurrence of needle in haystack (both rune slices).
+// Returns -1 if not found.
+func runeIndex(haystack, needle []rune) int {
+	if len(needle) == 0 {
+		return 0
+	}
+	if len(haystack) < len(needle) {
+		return -1
+	}
+	for i := 0; i <= len(haystack)-len(needle); i++ {
+		match := true
+		for j := range needle {
+			if haystack[i+j] != needle[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return i
+		}
+	}
+	return -1
 }
 
 // PadToWidth pads text with spaces to exactly targetWidth display cells.
