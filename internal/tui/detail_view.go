@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -33,9 +34,11 @@ type DetailView struct {
 	keys          KeyMap
 	pendingG      bool   // true when 'g' was pressed, waiting for second key
 	verbose       bool   // false=compact (default), true=verbose tool display
-	query         string // search query from session list (for highlight + jump)
+	query         string // active search query (for highlight + jump)
 	matchTurns    []int  // indices of turns containing the query
 	matchIdx      int    // current position in matchTurns (for n/N navigation)
+	searching     bool   // true when "/" search input is active
+	searchInput   textinput.Model
 }
 
 // NewDetailView creates a detail view for the given session.
@@ -43,6 +46,12 @@ type DetailView struct {
 func NewDetailView(session data.Session, width, height int, query string) DetailView {
 	vp := viewport.New(max(1, width-4), max(1, height-6))
 	vp.Style = lipgloss.NewStyle()
+
+	ti := textinput.New()
+	ti.Placeholder = "search..."
+	ti.CharLimit = 100
+	ti.Width = max(20, width/3)
+
 	return DetailView{
 		session:       session,
 		viewport:      vp,
@@ -52,6 +61,7 @@ func NewDetailView(session data.Session, width, height int, query string) Detail
 		toolCollapsed: make(map[int]bool),
 		keys:          DefaultKeyMap(),
 		query:         query,
+		searchInput:   ti,
 	}
 }
 
@@ -92,6 +102,37 @@ func (d DetailView) Update(msg tea.Msg) (DetailView, tea.Cmd) {
 		return d, nil
 
 	case tea.KeyMsg:
+		// ── Search input mode ──
+		if d.searching {
+			switch {
+			case msg.Type == tea.KeyEscape:
+				// Cancel search, keep old query.
+				d.searching = false
+				d.searchInput.Blur()
+				return d, nil
+			case msg.Type == tea.KeyEnter:
+				// Confirm search.
+				d.searching = false
+				d.searchInput.Blur()
+				newQuery := d.searchInput.Value()
+				if newQuery != d.query {
+					d.query = newQuery
+					d.buildMatchIndex()
+					d.matchIdx = 0
+					// Jump to first match.
+					if len(d.matchTurns) > 0 && d.matchTurns[0] < len(d.turnLineStart) {
+						d.viewport.SetYOffset(d.turnLineStart[d.matchTurns[0]])
+					}
+				}
+				return d, nil
+			default:
+				// Forward to text input.
+				var tiCmd tea.Cmd
+				d.searchInput, tiCmd = d.searchInput.Update(msg)
+				return d, tiCmd
+			}
+		}
+
 		// Handle pending 'g' for gg combo.
 		if d.pendingG {
 			d.pendingG = false
@@ -105,8 +146,22 @@ func (d DetailView) Update(msg tea.Msg) (DetailView, tea.Cmd) {
 
 		switch {
 		case key.Matches(msg, d.keys.Escape):
+			// If there's an active query, clear it first. Second Esc closes overlay.
+			if d.query != "" {
+				d.query = ""
+				d.matchTurns = nil
+				d.searchInput.SetValue("")
+				return d, nil
+			}
 			// Signal to close overlay — handled by parent.
 			return d, nil
+
+		case msg.String() == "/":
+			// Open inline search.
+			d.searching = true
+			d.searchInput.SetValue(d.query)
+			d.searchInput.Focus()
+			return d, textinput.Blink
 
 		case msg.String() == "t":
 			// Toggle compact/verbose mode.
@@ -286,11 +341,21 @@ func (d DetailView) renderHeader(width int) string {
 
 // renderFooter renders the bottom hint bar with scroll position and match info.
 func (d DetailView) renderFooter(width int) string {
+	// Search input mode: show the input inline.
+	if d.searching {
+		searchStyle := lipgloss.NewStyle().
+			Foreground(colorPrimary).
+			Bold(true)
+		prefix := searchStyle.Render("/")
+		inputView := d.searchInput.View()
+		return lipgloss.NewStyle().Width(width).Render(prefix + inputView)
+	}
+
 	mode := "compact"
 	if d.verbose {
 		mode = "verbose"
 	}
-	hints := fmt.Sprintf("j/k:scroll  {/}:turn  gg/G:top/end  t:%s  Esc:close", mode)
+	hints := fmt.Sprintf("j/k:scroll  {/}:turn  /:search  t:%s  Esc:close", mode)
 	if len(d.matchTurns) > 0 {
 		hints = fmt.Sprintf("n/N:match(%d/%d)  ", d.matchIdx+1, len(d.matchTurns)) + hints
 	}
