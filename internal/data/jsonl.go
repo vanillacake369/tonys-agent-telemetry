@@ -86,6 +86,14 @@ func truncate(s string, n int) string {
 	return string(runes[:n])
 }
 
+// systemTagRe matches XML-like system tags that appear in user messages.
+var systemTagRe = regexp.MustCompile(`<(?:system-reminder|local-command-caveat|task-notification|command-\w+)[^>]*>[\s\S]*?</(?:system-reminder|local-command-caveat|task-notification|command-\w+)>`)
+
+// stripSystemTags removes system-injected XML tags from user message text.
+func stripSystemTags(s string) string {
+	return strings.TrimSpace(systemTagRe.ReplaceAllString(s, ""))
+}
+
 // extractTextFromContent extracts plain text from a content value that is
 // either a plain JSON string or a []rawContentBlock array.
 // thinking blocks are replaced with thinkingPlaceholder.
@@ -136,7 +144,9 @@ func ParseSessionHeader(filepath string) (*Session, error) {
 	foundAny := false
 	var lastTimestamp time.Time
 	var searchParts []string
-	const maxSearchTextLen = 2000 // cap total search text to limit memory
+	var searchTextLen int
+	const maxSearchTextLen = 20000 // 20KB cap — covers ~500 turns at 40 chars each
+	const maxPerTurn = 80          // chars per turn for search indexing
 	scanner := bufio.NewScanner(f)
 	// Increase buffer size for long lines.
 	buf := make([]byte, 1<<20)
@@ -187,16 +197,17 @@ func ParseSessionHeader(filepath string) (*Session, error) {
 			text = strings.ReplaceAll(text, "\r", "")
 
 			if text != "" {
+				// Strip system tags that waste search space.
+				text = stripSystemTags(text)
+
 				if session.FirstPrompt == "" {
 					session.FirstPrompt = truncate(text, maxFirstPromptLen)
 				}
-				// Collect all user messages for full-text search.
-				currentLen := 0
-				for _, p := range searchParts {
-					currentLen += len(p)
-				}
-				if currentLen < maxSearchTextLen {
-					searchParts = append(searchParts, truncate(text, 200))
+				// Collect user messages for full-text search.
+				if searchTextLen < maxSearchTextLen {
+					chunk := truncate(text, maxPerTurn)
+					searchParts = append(searchParts, chunk)
+					searchTextLen += len(chunk)
 				}
 			}
 		}
