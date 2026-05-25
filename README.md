@@ -65,9 +65,10 @@ tonys-agent-telemetry --version
 | Key          | Action                                  |
 |--------------|-----------------------------------------|
 | `1`          | Switch to Sessions tab                  |
-| `2`          | Switch to Agents tab                    |
-| `3`          | Switch to DAG tab                       |
-| `4`          | Switch to Skills tab                    |
+| `2`          | Switch to Skills tab                    |
+| `3`          | Switch to Cost tab                      |
+| `4`          | Switch to Hooks tab                     |
+| `5`          | Switch to DAG tab                       |
 | `Ctrl+G`     | Switch to Control tab (Governance)      |
 | `Tab`        | Next tab                                |
 | `Shift+Tab`  | Previous tab                            |
