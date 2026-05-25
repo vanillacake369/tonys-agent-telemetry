@@ -415,60 +415,76 @@ func (d *DAGTab) renderTracesView() string {
 		sb.String(), d.width, max(3, d.height), true)
 }
 
-// renderGraphView shows the selected trace as a left-to-right flow with
-// the currently-selected node highlighted, plus a right-pane preview of
-// the selected span's attributes.
+// renderGraphView gives the FULL panel width to the graph. Selected-node
+// info is a single header line — the dedicated span-detail mode (Enter
+// from graph view) shows full attributes, so there's no value in
+// permanently consuming 40% of the screen for a right pane.
 //
-// Width allocation must be exact: RenderPanel wraps content with Width(N),
-// and lipgloss wraps (not truncates) on overflow. Wrapped box-drawing
-// chars look broken to the user. The contract is:
-//
-//	leftPanel.width + spacer + rightPanel.width == d.width - 2 (panel border)
+// This change was driven by user feedback: the right pane was squeezing
+// the graph so much that every box got truncated with '›' clip markers,
+// leaving wide empty padding on the right side.
 func (d *DAGTab) renderGraphView() string {
 	if len(d.flatNodes) == 0 {
 		return RenderEmptyState("(no spans in this trace)", d.width, d.height)
 	}
 
-	// Total inner content area inside RenderPanel = d.width - 2 (the
-	// panel's left + right border characters).
+	// All inner content goes to the graph. d.width - 2 reserves room for
+	// the surrounding panel border.
 	contentBudget := d.width - 2
 	if contentBudget < 20 {
 		contentBudget = 20
 	}
 
-	// Right pane is only useful if it has room for the span attribute
-	// labels (≈28 cols). Otherwise hide it and give all space to the graph.
-	const minRightPaneW = 28
-	const spacerW = 2 // visual gap between panes
-	leftW := contentBudget
-	rightW := 0
-	spacer := ""
-	if contentBudget >= minRightPaneW*2+spacerW {
-		// Both panes fit. Right takes ~40% (bounded by minRightPaneW).
-		rightW = contentBudget * 2 / 5
-		if rightW < minRightPaneW {
-			rightW = minRightPaneW
-		}
-		leftW = contentBudget - spacerW - rightW
-		spacer = "  "
-	}
+	// Header line: shows selected node summary inline, not in a side pane.
+	header := d.renderSelectedSummary(contentBudget)
 
-	leftPanel := d.renderGraph(leftW)
-	body := leftPanel
-	if rightW > 0 {
-		rightPanel := d.renderSelectedSpanCompact(rightW)
-		body = lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, spacer, rightPanel)
-	}
+	graph := d.renderGraph(contentBudget)
 
 	help := d.renderHelp([]helpKey{
-		{"j/k", "select node"}, {"enter/l", "detail"}, {"y", "yank JSON"},
-		{"e", "edit copy"}, {"r", "force redraw"}, {"esc/h", "back"},
+		{"j/k", "select"}, {"enter/l", "detail"}, {"y", "yank"},
+		{"e", "edit"}, {"r", "redraw"}, {"esc/h", "back"},
 	})
+
+	body := header + "\n\n" + graph + "\n\n" + help + d.renderFlash()
 
 	return RenderPanel(
 		fmt.Sprintf("Trace %s · %d nodes", shortID(d.activeTrace), len(d.flatNodes)),
-		body+"\n\n"+help+d.renderFlash(),
+		body,
 		d.width, max(3, d.height), true)
+}
+
+// renderSelectedSummary returns a one-line summary of the currently-
+// selected span. Trimmed to fit width so it never causes overflow.
+func (d *DAGTab) renderSelectedSummary(width int) string {
+	if d.nodeCursor >= len(d.flatNodes) {
+		return ""
+	}
+	s := d.flatNodes[d.nodeCursor].Span
+	labelStyle := lipgloss.NewStyle().Foreground(colorDim)
+	valStyle := lipgloss.NewStyle().Foreground(colorText).Bold(true)
+
+	parts := []string{
+		labelStyle.Render("span:") + " " + valStyle.Render(shortID(s.SpanID)),
+		labelStyle.Render("system:") + " " + valStyle.Render(s.System),
+	}
+	if s.Model != "" {
+		parts = append(parts, labelStyle.Render("model:")+" "+valStyle.Render(s.Model))
+	}
+	if s.InputTokens > 0 || s.OutputTokens > 0 {
+		parts = append(parts, labelStyle.Render("tokens:")+" "+valStyle.Render(fmtTokens(s.InputTokens, s.OutputTokens)))
+	}
+	if tool := s.Attrs["gen_ai.tool.name"]; tool != "" {
+		parts = append(parts, labelStyle.Render("tool:")+" "+valStyle.Render(tool))
+	}
+	line := strings.Join(parts, "  ·  ")
+	// Hard clip so a long model name can't blow up the header.
+	if w := len([]rune(stripAnsiSeq(line))); w > width {
+		// Aggressive truncate: keep ANSI styling intact for the visible
+		// prefix is too fiddly; just truncate to plain runes.
+		plain := []rune(stripAnsiSeq(line))
+		line = string(plain[:width-1]) + "›"
+	}
+	return line
 }
 
 // renderSpanView is the full-screen detail of a selected span.
@@ -600,28 +616,36 @@ func (d *DAGTab) renderGraph(width int) string {
 		}
 	}
 
-	// Box dimensions adapt to panel width so the graph reflows correctly
-	// when the user resizes their tmux/zellij pane. nodeW shrinks toward
-	// a 12-char minimum before any single line exceeds the panel.
+	// Box dimensions adapt to panel width. Lower bound is 8 chars so even
+	// 6-deep DAGs fit in 80-col terminals; the label degrades gracefully
+	// ("chat", "Bash", "Read"…) at this size and the dedicated span-detail
+	// view (Enter) carries the full attribute set anyway. Also, hgap
+	// shrinks alongside nodeW: a 22-char box needs a 4-char elbow to look
+	// right, but a 9-char box can settle for a 2-char elbow without losing
+	// the visual `─→`.
 	const (
-		nodeH      = 3 // box height (lines)
-		hgap       = 4 // chars between columns (elbow space)
-		vgap       = 1 // blank lines between rows
-		nodeWMin   = 12
-		nodeWMax   = 28
+		nodeH      = 3
+		vgap       = 1
+		nodeWMin   = 8
 		nodeWIdeal = 22
+		hgapMax    = 4
+		hgapMin    = 2
 	)
-	// Pre-walk window maxCol to pick a box width that fits the panel.
-	// Available cols for boxes = width - hgap*maxCol (gaps).
-	// nodeW such that (maxCol+1)*nodeW + maxCol*hgap ≤ width.
 	nodeW := nodeWIdeal
+	hgap := hgapMax
 	if width > 0 {
-		// Compute maxCol of the FULL layout first; we'll narrow below.
 		fitCols := maxCol + 1
-		usable := width - hgap*maxCol
-		candidate := usable / fitCols
-		if candidate < nodeWIdeal {
-			nodeW = clampInt(candidate, nodeWMin, nodeWIdeal)
+		// Try ideal first, then shrink box + gap together until the
+		// natural grid width fits the panel.
+		for nodeW > nodeWMin {
+			gw := fitCols*nodeW + maxCol*hgap
+			if gw <= width-2 { // -2 for the "  " cursor prefix
+				break
+			}
+			nodeW--
+			if nodeW <= 14 && hgap > hgapMin {
+				hgap = hgapMin // collapse the elbow gap on tight layouts
+			}
 		}
 	}
 	pitchX := nodeW + hgap

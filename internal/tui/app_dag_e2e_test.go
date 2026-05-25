@@ -97,9 +97,11 @@ func TestAppE2E_FullFlow_5ThenEnter(t *testing.T) {
 	// not the traces table. The user sees the rendered string — internal
 	// state being correct does not guarantee the screen updates.
 	view := a.(App).View()
-	if !strings.Contains(view, "select node") {
+	// Graph mode help contains both "enter/l" and "detail" — these are
+	// unique to the graph view's key bar.
+	if !strings.Contains(view, "detail") || !strings.Contains(view, "yank") {
 		t.Errorf("App.View() after Enter does not contain graph-mode help "+
-			"('select node'). User sees stale render. View dump:\n%s", view)
+			"('detail' + 'yank'). User sees stale render. View dump:\n%s", view)
 	}
 }
 
