@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/term"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/event"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/tui"
 )
@@ -37,6 +38,13 @@ func main() {
 		}
 	} else {
 		log.SetOutput(io.Discard)
+	}
+
+	// Bubbletea requires a tty; piped/redirected stdout causes ioctl errors.
+	// Detect early so the user gets a clear message instead of a stack trace.
+	if !term.IsTerminal(os.Stdout.Fd()) {
+		fmt.Fprintln(os.Stderr, "tonys-agent-telemetry: stdout is not a terminal (TUI requires a tty)")
+		os.Exit(1)
 	}
 
 	// Create the FIFO for real-time hook events.
