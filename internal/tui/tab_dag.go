@@ -59,6 +59,13 @@ type DAGTab struct {
 	flatNodes   []*telemetry.SpanNode
 	nodeCursor  int
 
+	// graph render cache — invalidated when any of the cache-key fields
+	// change (trace selected, spans added, cursor moved, panel resized).
+	// Without this, large traces re-render on every keystroke and freeze
+	// the UI thread for hundreds of ms.
+	graphCache    string
+	graphCacheKey string
+
 	// flash message — shown briefly at the bottom (e.g. "yanked!")
 	flash      string
 	flashUntil time.Time
@@ -457,9 +464,22 @@ func (d *DAGTab) renderSpanView() string {
 // This avoids the diagonal staircase that pure col=depth produces for
 // long Claude tool chains (which would overflow the terminal width
 // after ~6 levels).
+// maxVisibleNodes caps how many spans are rendered at once. The grid +
+// per-line lipgloss styling is O(N), so unbounded N freezes the UI on
+// 5000+ span traces. The user navigates the full trace by sliding the
+// window via j/k; cursor stays roughly 1/3 down the viewport.
+const maxVisibleNodes = 50
+
 func (d *DAGTab) renderGraph(width int) string {
 	if len(d.flatNodes) == 0 {
 		return ""
+	}
+
+	// Cache hit: same trace, same cursor, same width → reuse last render.
+	cacheKey := fmt.Sprintf("%s|n=%d|c=%d|w=%d",
+		d.activeTrace, len(d.flatNodes), d.nodeCursor, width)
+	if d.graphCache != "" && d.graphCacheKey == cacheKey {
+		return d.graphCache
 	}
 
 	// Chain-aware layout. Walk the forest; a single-child link inherits
@@ -503,6 +523,43 @@ func (d *DAGTab) renderGraph(width int) string {
 				nextRow++ // blank row between separate root subtrees
 			}
 			visit(n, 0)
+		}
+	}
+
+	// Windowing: render only the chunk around the cursor. Cursor sits
+	// at ~1/3 down the visible window so the user sees both context
+	// above and what's coming below.
+	totalNodes := len(positions)
+	winStart := d.nodeCursor - maxVisibleNodes/3
+	if winStart < 0 {
+		winStart = 0
+	}
+	winEnd := winStart + maxVisibleNodes
+	if winEnd > totalNodes {
+		winEnd = totalNodes
+		winStart = winEnd - maxVisibleNodes
+		if winStart < 0 {
+			winStart = 0
+		}
+	}
+	windowPositions := positions[winStart:winEnd]
+	if len(windowPositions) == 0 {
+		return ""
+	}
+	// Re-anchor row indices so the window starts at row 0.
+	baseRow := windowPositions[0].row
+	winPosByID := make(map[string]int, len(windowPositions))
+	for i := range windowPositions {
+		windowPositions[i].row -= baseRow
+		winPosByID[windowPositions[i].node.Span.SpanID] = i
+	}
+	positions = windowPositions
+	posByID = winPosByID
+	// Recompute maxCol within the window.
+	maxCol = 0
+	for _, p := range positions {
+		if p.col > maxCol {
+			maxCol = p.col
 		}
 	}
 
@@ -596,12 +653,21 @@ func (d *DAGTab) renderGraph(width int) string {
 		colorRanges = append(colorRanges, rowColor{start: y, end: y + nodeH, style: style})
 	}
 
+	// Show a window header so the user knows what's visible.
 	var sb strings.Builder
+	if totalNodes > maxVisibleNodes {
+		hint := lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render(
+			fmt.Sprintf("Nodes %d – %d of %d  (j/k slides window)", winStart+1, winEnd, totalNodes))
+		sb.WriteString(hint + "\n")
+	}
 	for y, row := range grid {
 		// Determine if this row is part of the selected node's box.
+		// The cursor index is global (into d.flatNodes); translate to
+		// the local windowed positions array.
 		selectedRow := false
-		if d.nodeCursor < len(positions) {
-			sp := positions[d.nodeCursor]
+		localCursor := d.nodeCursor - winStart
+		if localCursor >= 0 && localCursor < len(positions) {
+			sp := positions[localCursor]
 			boxYStart := sp.row * pitchY
 			if y >= boxYStart && y < boxYStart+nodeH {
 				selectedRow = true
@@ -629,11 +695,16 @@ func (d *DAGTab) renderGraph(width int) string {
 		}
 
 		// Cursor marker for the selected node's middle row.
-		if selectedRow && d.nodeCursor < len(positions) {
-			sp := positions[d.nodeCursor]
-			midY := sp.row*pitchY + nodeH/2
-			if y == midY {
-				line = cursorStyle.Render("▶ ") + line
+		if selectedRow {
+			localCursor := d.nodeCursor - winStart
+			if localCursor >= 0 && localCursor < len(positions) {
+				sp := positions[localCursor]
+				midY := sp.row*pitchY + nodeH/2
+				if y == midY {
+					line = cursorStyle.Render("▶ ") + line
+				} else {
+					line = "  " + line
+				}
 			} else {
 				line = "  " + line
 			}
@@ -646,7 +717,10 @@ func (d *DAGTab) renderGraph(width int) string {
 			sb.WriteString("\n")
 		}
 	}
-	return sb.String()
+	rendered := sb.String()
+	d.graphCache = rendered
+	d.graphCacheKey = cacheKey
+	return rendered
 }
 
 // drawBox writes a 3-row box border + label into the grid starting at (x, y).
