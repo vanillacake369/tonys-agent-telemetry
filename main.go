@@ -13,6 +13,9 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/event"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/provider/claudecode"
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/provider/ollama"
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/provider/otlp"
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/provider/vllm"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/telemetry"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/tui"
 )
@@ -56,12 +59,17 @@ func main() {
 		defer event.RemoveFIFO()
 	}
 
-	// Start the telemetry registry. Currently registers the Claude Code
-	// adapter only; vLLM / Ollama / OTLP receivers will join later.
+	// Start the telemetry registry. Registers every provider adapter; each
+	// Detect() runs in priority order and only those that report present
+	// have their Ingest() goroutines started. Registration order doubles
+	// as detection priority — register the more specific detectors first.
 	telCtx, telCancel := context.WithCancel(context.Background())
 	defer telCancel()
 	reg := telemetry.NewRegistry()
-	reg.Register(claudecode.New())
+	reg.Register(claudecode.New()) // ~/.claude — no port collision
+	reg.Register(otlp.New())       // listens on :4318 if free
+	reg.Register(vllm.New())       // probes :8000 /metrics with vllm: prefix
+	reg.Register(ollama.New())     // probes :11434 /api/tags
 	spans := make(chan telemetry.Span, 256)
 	go reg.StartAll(telCtx, spans)
 
