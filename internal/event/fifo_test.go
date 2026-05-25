@@ -165,7 +165,7 @@ func TestFIFO_Roundtrip(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	ch := ReadFIFOFromPath(ctx, fifoPath)
+	ch := readFIFOFromPath(ctx, fifoPath)
 
 	// Write an event after a brief moment so the reader goroutine is ready.
 	go func() {
@@ -201,7 +201,7 @@ func TestFIFO_MalformedData_Skipped(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	ch := ReadFIFOFromPath(ctx, fifoPath)
+	ch := readFIFOFromPath(ctx, fifoPath)
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
@@ -238,7 +238,7 @@ func TestFIFO_ContextCancellation_ClosesChannel(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	ch := ReadFIFOFromPath(ctx, fifoPath)
+	ch := readFIFOFromPath(ctx, fifoPath)
 
 	// Cancel immediately to trigger goroutine shutdown.
 	cancel()

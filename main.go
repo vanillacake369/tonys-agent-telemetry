@@ -1,19 +1,13 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log"
 	"os"
-	"os/signal"
-	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
-	xterm "github.com/charmbracelet/x/term"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/event"
-	"github.com/vanillacake369/tonys-agent-telemetry/internal/provider/claudecode"
-	"github.com/vanillacake369/tonys-agent-telemetry/internal/telemetry"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/tui"
 )
 
@@ -29,11 +23,6 @@ func main() {
 			printUsage()
 			return
 		}
-	}
-
-	if !xterm.IsTerminal(os.Stdout.Fd()) {
-		fmt.Fprintln(os.Stderr, "tonys-agent-telemetry: stdout is not a terminal (TUI requires a tty)")
-		os.Exit(1)
 	}
 
 	// Suppress log output during TUI — stderr corrupts the alt screen.
@@ -54,31 +43,11 @@ func main() {
 		defer event.RemoveFIFO()
 	}
 
-	// Telemetry registry — ClaudeCodeIngestor registered here.
-	// App ignores spans channel until S5; both the existing FIFO path and the
-	// ingestor path run in parallel during S2-S4 (no regression in UI behavior).
-	reg := telemetry.NewRegistry()
-	reg.Register(claudecode.NewIngestor(event.DefaultFIFOPath))
-	spans := make(chan telemetry.Span, 64)
-	ctx, cancelTel := context.WithCancel(context.Background())
-	defer cancelTel()
-	go reg.StartAll(ctx, spans)
-
-	app := tui.NewApp()
-	p := tea.NewProgram(app, tea.WithAltScreen())
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGHUP)
-	go func() {
-		<-sigChan
-		p.Quit()
-	}()
-
+	p := tea.NewProgram(tui.NewApp(), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	app.CancelFIFO()
 }
 
 func printUsage() {
