@@ -33,8 +33,13 @@ type Recommender struct {
 }
 
 func NewRecommender() *Recommender {
-	home, _ := os.UserHomeDir()
-	cache := filepath.Join(home, ".gemini", "cache", "skill_recommendations.json")
+	cacheRoot, err := os.UserCacheDir()
+	if err != nil {
+		// Fallback to home dir if XDG cache unresolvable.
+		home, _ := os.UserHomeDir()
+		cacheRoot = filepath.Join(home, ".cache")
+	}
+	cache := filepath.Join(cacheRoot, "tonys-agent-telemetry", "skill_recommendations.json")
 	return &Recommender{cachePath: cache}
 }
 
@@ -118,7 +123,7 @@ func (r *Recommender) analyzeWorkflow(gCtx GlobalContext) []Recommendation {
 	// 1. Identify "The Power User" (Multi-provider usage)
 	if len(gCtx.ProviderConfigs) >= 2 {
 		recs = append(recs, Recommendation{
-			RepoURL:   "https://github.com/vanillacake369/awesome-skills/agent-orchestration",
+			RepoURL:   "",  // TODO: pending awesome-skills registry — was: vanillacake369/awesome-skills/agent-orchestration",
 			Reasoning: fmt.Sprintf("You are using %d different AI agents (Claude, Gemini, etc.). This skill set optimizes multi-agent coordination and context sharing.", len(gCtx.ProviderConfigs)),
 			Score:     95,
 		})
@@ -138,7 +143,7 @@ func (r *Recommender) analyzeWorkflow(gCtx GlobalContext) []Recommendation {
 
 	if hasNix && hasGo {
 		recs = append(recs, Recommendation{
-			RepoURL:   "https://github.com/vanillacake369/awesome-skills/nix-go",
+			RepoURL:   "",  // TODO: pending awesome-skills registry — was: vanillacake369/awesome-skills/nix-go",
 			Reasoning: "Detected a Go project in a Nix environment. These skills provide optimized devshells and hermetic build workflows.",
 			Score:     90,
 		})
@@ -153,7 +158,7 @@ func (r *Recommender) analyzeWorkflow(gCtx GlobalContext) []Recommendation {
 
 	if strings.Contains(combinedText, "k8s") || strings.Contains(combinedText, "kubernetes") {
 		recs = append(recs, Recommendation{
-			RepoURL:   "https://github.com/vanillacake369/awesome-skills/k8s-operator",
+			RepoURL:   "",  // TODO: pending awesome-skills registry — was: vanillacake369/awesome-skills/k8s-operator",
 			Reasoning: "Your conversation history across providers shows heavy focus on Kubernetes. These skills help with CRD management and controller patterns.",
 			Score:     85,
 		})
@@ -161,7 +166,7 @@ func (r *Recommender) analyzeWorkflow(gCtx GlobalContext) []Recommendation {
 
 	if strings.Contains(combinedText, "tui") || strings.Contains(combinedText, "bubbletea") {
 		recs = append(recs, Recommendation{
-			RepoURL:   "https://github.com/vanillacake369/awesome-skills/tui-design",
+			RepoURL:   "",  // TODO: pending awesome-skills registry — was: vanillacake369/awesome-skills/tui-design",
 			Reasoning: "Frequent mentions of TUI and Bubble Tea detected. This repository contains advanced components for rich terminal interfaces.",
 			Score:     88,
 		})
