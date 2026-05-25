@@ -64,7 +64,7 @@ func NewAdvisorPipeline() *AdvisorPipeline {
 // RecommendationsReadyMsg that App.Update routes to TabSkills.
 //
 // DRY: signal.Extract is called exactly once per trigger inside the cmd closure.
-func (p *AdvisorPipeline) MaybeRun(spans []telemetry.Span, items []catalog.Item, installedSkillNames []string) tea.Cmd {
+func (p *AdvisorPipeline) MaybeRun(spans []telemetry.Span, items []catalog.Item, installedSkillNames []string, cache *ForestCache) tea.Cmd {
 	now := time.Now()
 
 	// Debounce guard: skip if called too soon after the last run.
@@ -93,10 +93,9 @@ func (p *AdvisorPipeline) MaybeRun(spans []telemetry.Span, items []catalog.Item,
 	copy(skillNamesCopy, installedSkillNames)
 
 	return func() tea.Msg {
-		forest := telemetry.BuildForests(spansCopy)
 		opts := signal.DefaultExtractOpts()
 		opts.InstalledSkills = skillNamesCopy
-		sigs := signal.Extract(forest, opts)
+		sigs := cache.Get(spansCopy, opts)
 		recs := recommender.NewEngine().Recommend(sigs, itemsCopy)
 		return RecommendationsReadyMsg{Recommendations: recs}
 	}

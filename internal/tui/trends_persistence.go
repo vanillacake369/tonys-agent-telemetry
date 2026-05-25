@@ -45,7 +45,7 @@ func NewTrendsPersistence(store *signalstore.Store) *TrendsPersistence {
 // The lastFlush timestamp is updated inside the closure (running in the cmd's
 // goroutine) under mu to avoid a data race with any future reader on the
 // main goroutine.
-func (p *TrendsPersistence) FlushCmd(sessionID string, spans []telemetry.Span) tea.Cmd {
+func (p *TrendsPersistence) FlushCmd(sessionID string, spans []telemetry.Span, cache *ForestCache) tea.Cmd {
 	if len(spans) == 0 {
 		return nil
 	}
@@ -55,8 +55,7 @@ func (p *TrendsPersistence) FlushCmd(sessionID string, spans []telemetry.Span) t
 	copy(spansCopy, spans)
 
 	return func() tea.Msg {
-		forest := telemetry.BuildForests(spansCopy)
-		sigs := signal.Extract(forest, signal.DefaultExtractOpts())
+		sigs := cache.Get(spansCopy, signal.DefaultExtractOpts())
 
 		// Don't write an empty snapshot — no signals means no useful data.
 		if len(sigs) == 0 {

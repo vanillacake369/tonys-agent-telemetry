@@ -37,7 +37,7 @@ func TestPersistence_FlushWritesToStore(t *testing.T) {
 	}
 
 	// FlushCmd now returns a cmd closure; invoke it to perform the work.
-	cmd := p.FlushCmd("test-session", spans)
+	cmd := p.FlushCmd("test-session", spans, NewForestCache())
 	if cmd != nil {
 		_ = cmd()
 	}
@@ -60,7 +60,7 @@ func TestPersistence_FlushHandlesEmptySpans(t *testing.T) {
 	p := NewTrendsPersistence(store)
 
 	// No spans → FlushCmd returns nil immediately (no work deferred).
-	cmd := p.FlushCmd("empty-session", nil)
+	cmd := p.FlushCmd("empty-session", nil, NewForestCache())
 	if cmd != nil {
 		_ = cmd()
 	}
@@ -92,7 +92,7 @@ func TestPersistence_FlushErrorIsLogged_NotPanic(t *testing.T) {
 			t.Errorf("FlushCmd panicked: %v", r)
 		}
 	}()
-	cmd := p.FlushCmd("error-session", spans)
+	cmd := p.FlushCmd("error-session", spans, NewForestCache())
 	if cmd != nil {
 		_ = cmd()
 	}
@@ -110,7 +110,7 @@ func TestPersistence_FlushCmdReturnsNonNilCmdForWork(t *testing.T) {
 		buildSpanForTest("trace-deferred", "span-d", 30*time.Second),
 	}
 
-	cmd := p.FlushCmd("deferred-session", spans)
+	cmd := p.FlushCmd("deferred-session", spans, NewForestCache())
 	if cmd == nil {
 		t.Error("FlushCmd with non-empty spans must return a non-nil cmd (work must be deferred)")
 	}
@@ -127,8 +127,9 @@ func TestPersistence_ConcurrentFlushCmds_NoRace(t *testing.T) {
 		buildSpanForTest("trace-race-1", "span-r1", 30*time.Second),
 	}
 
-	cmd1 := p.FlushCmd("race-session-1", spans)
-	cmd2 := p.FlushCmd("race-session-2", spans)
+	cache := NewForestCache()
+	cmd1 := p.FlushCmd("race-session-1", spans, cache)
+	cmd2 := p.FlushCmd("race-session-2", spans, cache)
 
 	var wg sync.WaitGroup
 	if cmd1 != nil {

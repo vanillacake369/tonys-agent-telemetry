@@ -16,13 +16,13 @@ func TestAdvisorPipeline_Debounces_FastConsecutiveRuns(t *testing.T) {
 	items := makeMatchingCatalogItems()
 
 	// First run — should return a cmd.
-	cmd1 := p.MaybeRun(spans, items, nil)
+	cmd1 := p.MaybeRun(spans, items, nil, NewForestCache())
 	if cmd1 == nil {
 		t.Fatal("first MaybeRun should return a non-nil cmd on a fresh pipeline")
 	}
 
 	// Second run immediately after — within debounce window, must return nil.
-	cmd2 := p.MaybeRun(spans, items, nil)
+	cmd2 := p.MaybeRun(spans, items, nil, NewForestCache())
 	if cmd2 != nil {
 		t.Error("second MaybeRun within debounce window should return nil")
 	}
@@ -36,10 +36,11 @@ func TestAdvisorPipeline_RunsAfterDebounceElapsed(t *testing.T) {
 	spans := makeStalledSpans("trace-1", 1)
 	items := makeMatchingCatalogItems()
 
-	_ = p.MaybeRun(spans, items, nil)
+	cache := NewForestCache()
+	_ = p.MaybeRun(spans, items, nil, cache)
 	time.Sleep(5 * time.Millisecond) // past the 1ms test window
 
-	cmd := p.MaybeRun(append(spans, makeStalledSpans("trace-2", 5)...), items, nil)
+	cmd := p.MaybeRun(append(spans, makeStalledSpans("trace-2", 5)...), items, nil, cache)
 	if cmd == nil {
 		t.Error("MaybeRun after debounce elapsed should return a non-nil cmd")
 	}
@@ -55,13 +56,13 @@ func TestAdvisorPipeline_RespectsMinSpanDelta(t *testing.T) {
 
 	// Seed 10 spans on first run.
 	initialSpans := makeStalledSpans("trace-seed", 10)
-	_ = p.MaybeRun(initialSpans, items, nil)
+	_ = p.MaybeRun(initialSpans, items, nil, NewForestCache())
 	time.Sleep(5 * time.Millisecond)
 
 	// Provide only 2 more spans (below default delta=5).
 	tinyDelta := makeStalledSpans("trace-tiny", 2)
 	allSpans := append(initialSpans, tinyDelta...)
-	cmd := p.MaybeRun(allSpans, items, nil)
+	cmd := p.MaybeRun(allSpans, items, nil, NewForestCache())
 	if cmd != nil {
 		t.Errorf("MaybeRun with only %d new spans should return nil (below MinSpansDelta=%d)",
 			len(tinyDelta), AdvisorMinSpansDelta)
@@ -78,7 +79,7 @@ func TestAdvisorPipeline_EndToEnd_SyntheticForestProducesRecommendation(t *testi
 	spans := makeStalledSpans("trace-e2e", 1)
 	items := makeMatchingCatalogItems()
 
-	cmd := p.MaybeRun(spans, items, nil)
+	cmd := p.MaybeRun(spans, items, nil, NewForestCache())
 	if cmd == nil {
 		t.Fatal("MaybeRun returned nil for non-empty spans+items")
 	}
@@ -143,7 +144,7 @@ func TestAdvisorPipeline_UnusedSkillSignalFires(t *testing.T) {
 
 	installedSkillNames := []string{"TestRunner", "NeverUsed"}
 
-	cmd := p.MaybeRun(spans, items, installedSkillNames)
+	cmd := p.MaybeRun(spans, items, installedSkillNames, NewForestCache())
 	if cmd == nil {
 		t.Fatal("MaybeRun returned nil — pipeline did not trigger")
 	}
