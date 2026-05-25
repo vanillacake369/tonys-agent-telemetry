@@ -118,6 +118,50 @@ typically reacts by trying a different approach or asking for guidance.
 
 Press `Ctrl+G` to view the Control tab with live budget bars and denial log.
 
+## Telemetry sinks & replay (Phase 4)
+
+Every span collected by the auto-detected providers can be forwarded,
+recorded, or replayed via CLI flags. The producing pipeline is never
+blocked: each branch has its own buffer and slow consumers drop rather
+than backpressure the source.
+
+```sh
+# Forward spans to a remote OTLP/JSON receiver (Tempo, Honeycomb, Langfuse, ...).
+tonys-agent-telemetry --otlp-export http://tempo:4318/v1/traces
+
+# Record every span to a local file for later inspection.
+tonys-agent-telemetry --snapshot-record /tmp/agents-2026-05-25.jsonl
+
+# Replay a recorded session into the TUI (live providers are disabled).
+tonys-agent-telemetry --replay /tmp/agents-2026-05-25.jsonl
+```
+
+Env vars `TAT_OTLP_EXPORT` and `TAT_SNAPSHOT_RECORD` provide the same
+behavior without CLI flags.
+
+### Plugin SDK — the OTLP receiver IS the plugin interface
+
+Any process that emits OTLP/JSON spans to `http://localhost:4318/v1/traces`
+is automatically ingested into the same pipeline as the native providers.
+No Go-plugin loading, no custom protocol — just standard OTel export.
+
+Examples:
+
+```sh
+# Python agent using OpenLLMetry → exports to our receiver
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318 \
+  python my_langgraph_agent.py
+```
+
+```sh
+# LiteLLM proxy → emits per-request spans for any model it routes
+litellm --otel-export-url http://localhost:4318
+```
+
+This is why no LiteLLM-style proxy is built into this binary: LiteLLM
+already emits OTLP and pointing its exporter here gives you the same
+visibility plus LiteLLM's routing/cost-tracking on top.
+
 ## Hook Setup
 
 `tonys-agent-telemetry` receives live events from Claude Code via a named FIFO at `/tmp/tonys-agent-telemetry.fifo`.
