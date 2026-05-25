@@ -173,6 +173,7 @@ func TestBackfill_ContextCancelStopsEmission(t *testing.T) {
 	writeJSONL(t, filepath.Join(fake, "projects", "-p"), "s.jsonl", lines)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // always release the context, even if the test fails early
 	out := make(chan telemetry.Span, 1) // small buffer so backfill blocks on send
 
 	done := make(chan error, 1)
@@ -202,6 +203,7 @@ func TestIngest_IncludesBackfillOutput(t *testing.T) {
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // ensure context is always released
 	out := make(chan telemetry.Span, 8)
 	go func() {
 		_ = New().Ingest(ctx, out)
