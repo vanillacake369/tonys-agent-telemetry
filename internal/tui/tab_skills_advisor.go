@@ -9,30 +9,34 @@ import (
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/recommender"
 )
 
+// Advisor empty-state strings — exposed as constants so tests can assert
+// substring presence without coupling to formatting changes.
+//
+// SSoT: changing these strings here updates both the UI and the tests.
+const (
+	advisorEmptyNoSpans   = "Advisor — ingest sessions to see recommendations (run claude sessions or use --replay <file>)."
+	advisorEmptyNoMatches = "Advisor — signals extracted but no catalog matches yet. Keep working; recommendations appear after more activity."
+	advisorDAGNavHint     = "(press 5 to view DAG)"
+)
+
 // renderAdvisorSection renders the Advisor pane for the Skills tab.
 //
-// It is intentionally a standalone function (not a method on SkillsTab) so that
-// it can be unit-tested independently of the full tab state. The caller
-// (SkillsTab.View) simply passes in the current recommendations slice and the
-// available width.
-//
-// Layout (80-column friendly):
-//
-//	━━━ Advisor ━━━
-//	(3 recommendations based on your recent activity)
-//
-//	▸ [skill] Test-Driven Flow            score 0.78
-//	  Triggered by: sig-abc (stalled_node)
-//	  Why: shell, performance
+// pipelineRan indicates whether the advisor pipeline has produced output
+// at least once. False → no spans / pipeline never ran → show the "ingest
+// sessions" guide. True with empty recs → "no matches yet". Non-empty recs
+// → render the list with citations.
 //
 // SRP: only rendering here — no mutation, no tea.Cmd.
-// Micro-module: keep this file ≤100 lines.
-func renderAdvisorSection(recs []recommender.Recommendation, width int) string {
+// Micro-module: keep this file ≤120 lines.
+func renderAdvisorSection(recs []recommender.Recommendation, width int, pipelineRan bool) string {
 	sep := lipgloss.NewStyle().Foreground(colorDim).Render(strings.Repeat("━", min(width, 80)))
 
 	if len(recs) == 0 {
-		emptyLine := lipgloss.NewStyle().Foreground(colorDim).Italic(true).
-			Render("Advisor — no signals match catalog yet. Keep working; recommendations appear after debounce.")
+		msg := advisorEmptyNoSpans
+		if pipelineRan {
+			msg = advisorEmptyNoMatches
+		}
+		emptyLine := lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render(msg)
 		return strings.Join([]string{sep, emptyLine}, "\n")
 	}
 
@@ -51,7 +55,18 @@ func renderAdvisorSection(recs []recommender.Recommendation, width int) string {
 		)
 
 		// Citation line (evidence chain — GA gate requirement).
-		citationLine := fmt.Sprintf("  Triggered by signal: %s", r.SignalID)
+		// Trace-anchored signals (most common case) carry a TraceID — render a
+		// "press 5 to view DAG" nav hint so users can trace the evidence back
+		// to the source span. Cross-session signals (e.g. unused_installed_skill)
+		// have an empty TraceID — render a different phrasing.
+		var citationLine string
+		if r.TraceID != "" {
+			citationLine = fmt.Sprintf("  Triggered by signal %s in trace %s %s",
+				r.SignalID, r.TraceID, advisorDAGNavHint)
+		} else {
+			citationLine = fmt.Sprintf("  Triggered by signal %s (cross-session — no specific trace)",
+				r.SignalID)
+		}
 		rows = append(rows,
 			lipgloss.NewStyle().Foreground(colorDim).Render(citationLine),
 		)

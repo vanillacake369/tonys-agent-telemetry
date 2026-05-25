@@ -93,6 +93,11 @@ type SkillsTab struct {
 
 	// Advisor pane state — populated by RecommendationsReadyMsg routed from App.
 	recommendations []recommender.Recommendation
+	// pipelineRan flips to true after the first RecommendationsReadyMsg arrives.
+	// It distinguishes "no spans ingested yet" (false) from "pipeline ran but
+	// produced zero matches" (true, empty recs) so the Advisor empty state can
+	// give the user actionable guidance (QA finding U-2).
+	pipelineRan bool
 }
 
 // NewSkillsTab creates an initialised SkillsTab.
@@ -233,6 +238,10 @@ func (t SkillsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 	case RecommendationsReadyMsg:
 		// Replace (not append) — each pipeline run supersedes the previous result.
 		t.recommendations = msg.Recommendations
+		// Once a pipeline result arrives (even with zero recs), we know spans
+		// existed and signals were extracted. Flip the flag so the Advisor
+		// empty-state switches from "ingest sessions" to "no matches yet".
+		t.pipelineRan = true
 		return t, nil
 
 	case skillsDebounceMsg:
@@ -625,7 +634,7 @@ func (t SkillsTab) View() string {
 	}
 
 	catalogSection := t.renderCatalogSection(t.width)
-	advisorSection := renderAdvisorSection(t.recommendations, t.width)
+	advisorSection := renderAdvisorSection(t.recommendations, t.width, t.pipelineRan)
 	return splitView + "\n" + catalogSection + "\n" + advisorSection
 }
 

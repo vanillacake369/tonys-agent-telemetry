@@ -51,15 +51,89 @@ func TestSkillsTab_RendersAdvisorRecommendations(t *testing.T) {
 	}
 }
 
-// TestSkillsTab_RendersAdvisorEmptyState asserts that when no recommendations
-// are present, the single-line empty-state message appears.
-func TestSkillsTab_RendersAdvisorEmptyState(t *testing.T) {
+// TestSkillsTab_RendersAdvisorEmptyState_NoSpans asserts that on a fresh
+// launch (no RecommendationsReadyMsg ever received), the Advisor shows the
+// "ingest sessions" guidance — not the misleading "no signals match" message
+// (QA finding U-2 — distinguish no-spans from no-matches).
+func TestSkillsTab_RendersAdvisorEmptyState_NoSpans(t *testing.T) {
 	s := NewSkillsTab()
 	s = s.SetSize(120, 40).(SkillsTab)
 
 	view := s.View()
-	if !strings.Contains(view, "no signals match catalog yet") {
-		t.Errorf("View() does not show empty-state line.\nView excerpt: %.800s", view)
+	if !strings.Contains(view, advisorEmptyNoSpans) {
+		t.Errorf("View() does not show the no-spans empty-state.\nWant substring: %q\nView excerpt: %.800s", advisorEmptyNoSpans, view)
+	}
+	if strings.Contains(view, advisorEmptyNoMatches) {
+		t.Errorf("View() shows the no-matches message before any pipeline run — should show no-spans message instead.")
+	}
+}
+
+// TestSkillsTab_RendersAdvisorEmptyState_NoMatches asserts that after a
+// pipeline run that produced zero recommendations (signals extracted but no
+// catalog match), the Advisor switches to the "no matches yet" message
+// (QA finding U-2).
+func TestSkillsTab_RendersAdvisorEmptyState_NoMatches(t *testing.T) {
+	s := NewSkillsTab()
+	s = s.SetSize(120, 40).(SkillsTab)
+
+	// Empty recommendations list represents "pipeline ran, no matches".
+	s, _ = updateSkillsTab(t, s, RecommendationsReadyMsg{Recommendations: nil})
+
+	view := s.View()
+	if !strings.Contains(view, advisorEmptyNoMatches) {
+		t.Errorf("View() does not switch to no-matches message after pipeline run.\nWant substring: %q\nView excerpt: %.800s", advisorEmptyNoMatches, view)
+	}
+	if strings.Contains(view, advisorEmptyNoSpans) {
+		t.Errorf("View() still shows the no-spans message after pipeline ran — pipelineRan flag not honored.")
+	}
+}
+
+// TestSkillsTab_AdvisorRendersTraceIDAndNavHint asserts that a Recommendation
+// with a non-empty TraceID renders the trace ID plus the "press 5 to view DAG"
+// hint so users can navigate to the evidence (QA finding U-3).
+func TestSkillsTab_AdvisorRendersTraceIDAndNavHint(t *testing.T) {
+	s := NewSkillsTab()
+	s = s.SetSize(120, 40).(SkillsTab)
+
+	items := makeCatalogItems(catalog.MinViableEntries)
+	s, _ = updateSkillsTab(t, s, CatalogLoadedMsg{Items: items, FetchedAt: time.Now()})
+
+	recs := []recommender.Recommendation{
+		{SignalID: "sig-abc", TraceID: "trace-xyz", CatalogItemID: "skill/x", Title: "X", Score: 0.5},
+	}
+	s, _ = updateSkillsTab(t, s, RecommendationsReadyMsg{Recommendations: recs})
+
+	view := s.View()
+	if !strings.Contains(view, "trace-xyz") {
+		t.Errorf("View() does not render TraceID 'trace-xyz'.\nView excerpt: %.800s", view)
+	}
+	if !strings.Contains(view, advisorDAGNavHint) {
+		t.Errorf("View() does not render DAG nav hint %q.\nView excerpt: %.800s", advisorDAGNavHint, view)
+	}
+}
+
+// TestSkillsTab_AdvisorCrossSessionSignalRendersDifferently asserts that a
+// Recommendation with an empty TraceID (e.g. unused_installed_skill, which is
+// cross-trace) renders distinct phrasing rather than misleading "trace " line
+// (QA finding U-3).
+func TestSkillsTab_AdvisorCrossSessionSignalRendersDifferently(t *testing.T) {
+	s := NewSkillsTab()
+	s = s.SetSize(120, 40).(SkillsTab)
+
+	items := makeCatalogItems(catalog.MinViableEntries)
+	s, _ = updateSkillsTab(t, s, CatalogLoadedMsg{Items: items, FetchedAt: time.Now()})
+
+	recs := []recommender.Recommendation{
+		{SignalID: "sig-cross", TraceID: "", CatalogItemID: "skill/y", Title: "Y", Score: 0.5},
+	}
+	s, _ = updateSkillsTab(t, s, RecommendationsReadyMsg{Recommendations: recs})
+
+	view := s.View()
+	if !strings.Contains(view, "cross-session") {
+		t.Errorf("View() does not indicate cross-session signal.\nView excerpt: %.800s", view)
+	}
+	if strings.Contains(view, advisorDAGNavHint) {
+		t.Errorf("View() shows DAG nav hint for cross-session signal — should not.")
 	}
 }
 
