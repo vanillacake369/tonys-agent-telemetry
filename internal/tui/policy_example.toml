@@ -1,0 +1,39 @@
+# tonys-agent-telemetry policy.toml — example & reference
+#
+# This file is loaded by the hook-handler binary BEFORE every Claude Code
+# tool call. Missing/malformed files are tolerated (fail-open).
+#
+# Path: $XDG_CONFIG_HOME/tonys-agent-telemetry/policy.toml
+#       (typically ~/.config/tonys-agent-telemetry/policy.toml)
+
+[budget]
+# Hard cap per Claude Code session (USD). 0 = unlimited.
+session_max_usd = 5.0
+
+# Hard cap per UTC day across all sessions. 0 = unlimited.
+daily_max_usd = 50.0
+
+# Warn (do not block) when budget reaches this fraction.
+warn_at_fraction = 0.8
+
+[tools]
+# Block matching tool invocations. Glob patterns matched against
+# "ToolName:input_summary". Common examples:
+denylist = [
+    "Bash:rm -rf*",
+    "Bash:dd if=*",
+    "Bash:mkfs*",
+    "WebFetch:*.onion*",
+]
+
+# If non-empty, ONLY these patterns are allowed; all others denied.
+# Leave empty to allow everything not on the denylist.
+allowlist = []
+
+[models.pricing]
+# Per-model pricing for budget calculations. USD per 1M tokens.
+# Falls back to a built-in table if omitted, but overriding here
+# guarantees you control your cost accounting.
+"claude-sonnet-4-6"        = { input = 3.0,  output = 15.0 }
+"claude-opus-4-7"          = { input = 15.0, output = 75.0 }
+"claude-haiku-4-5-20251001" = { input = 0.25, output = 1.25 }

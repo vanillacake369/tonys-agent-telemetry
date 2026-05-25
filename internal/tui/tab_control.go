@@ -1,9 +1,11 @@
 package tui
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -12,6 +14,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/control"
 )
+
+// examplePolicyTOML is the canonical sample policy that ships with the
+// binary. Used as the seed when the user presses 'e' against a non-existent
+// policy file, and rendered inline in the Control tab when no policy is
+// loaded so users immediately see what's configurable.
+//
+//go:embed policy_example.toml
+var examplePolicyTOML string
 
 // ControlRefreshMsg is sent when budget/denial data has been reloaded.
 type ControlRefreshMsg struct {
@@ -108,14 +118,24 @@ func (t ControlTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 	return t, nil
 }
 
-// openEditorCmd opens policy.toml in $EDITOR using tea.ExecProcess.
+// openEditorCmd opens policy.toml in $EDITOR. If the file does not exist,
+// it is first created from the embedded example so the user lands on a
+// commented template instead of a blank file.
 func (t ControlTab) openEditorCmd() tea.Cmd {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
 		editor = "vi"
 	}
 	p := t.policyPath
+
+	// Ensure parent dir + file exist with sensible defaults before editing.
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		_ = os.MkdirAll(filepath.Dir(p), 0o755)
+		_ = os.WriteFile(p, []byte(examplePolicyTOML), 0o644)
+	}
+
 	return tea.ExecProcess(editorCommand(editor, p), func(err error) tea.Msg {
+		// Reload after editor exits so changes show up immediately.
 		return ControlRefreshMsg{}
 	})
 }
@@ -141,6 +161,16 @@ func (t ControlTab) View() string {
 		return RenderLoadingState(t.width, t.height)
 	}
 
+	// First-run state — no policy AND no recorded activity. Show the
+	// full setup guide. Once any data exists (e.g. user ran the hook
+	// handler once and triggered a fail-open denial log entry), fall
+	// through to the normal layout so they don't lose visibility.
+	policyEmpty := t.policy.Budget.SessionMaxUSD == 0 && t.policy.Budget.DailyMaxUSD == 0 &&
+		len(t.policy.Tools.Denylist) == 0 && len(t.policy.Tools.Allowlist) == 0
+	if policyEmpty && len(t.denials) == 0 && len(t.budgets) == 0 {
+		return t.renderEmptyStateGuide()
+	}
+
 	var sb strings.Builder
 
 	// POLICY section.
@@ -159,11 +189,130 @@ func (t ControlTab) View() string {
 	sb.WriteString(sectionHeader("RECENT DENIALS", t.width))
 	sb.WriteString("\n")
 	sb.WriteString(renderDenials(t.denials, t.width))
+	sb.WriteString("\n\n")
+
+	// Help footer (k9s-style).
+	sb.WriteString(renderControlHelp(t.width))
 
 	return lipgloss.NewStyle().
 		Width(max(0, t.width)).
 		Height(max(0, t.height)).
 		Render(sb.String())
+}
+
+// renderEmptyStateGuide is shown when the user has not yet created a
+// policy file. Inspired by k9s's "no resources found" guidance: tell the
+// user what to do, where the file lives, and what's configurable.
+func (t ControlTab) renderEmptyStateGuide() string {
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorPrimary)
+	warnStyle := lipgloss.NewStyle().Foreground(colorWarning).Bold(true)
+	pathStyle := lipgloss.NewStyle().Foreground(colorText).Underline(true)
+	dimStyle := lipgloss.NewStyle().Foreground(colorDim)
+	keyStyle := lipgloss.NewStyle().Foreground(colorSuccess).Bold(true)
+
+	var sb strings.Builder
+
+	sb.WriteString(titleStyle.Render("Control Plane — runtime governance for Claude Code"))
+	sb.WriteString("\n")
+	sb.WriteString(strings.Repeat("─", min(t.width, 70)))
+	sb.WriteString("\n\n")
+
+	sb.WriteString(warnStyle.Render("⚠  No policy loaded — running in fail-open mode."))
+	sb.WriteString("\n")
+	sb.WriteString(dimStyle.Render("   Every tool call is allowed. No budget caps apply."))
+	sb.WriteString("\n\n")
+
+	sb.WriteString("Policy file: " + pathStyle.Render(t.policyPath))
+	sb.WriteString("\n\n")
+
+	sb.WriteString("Press " + keyStyle.Render("e") + " to create a starter file and open it in $EDITOR.")
+	sb.WriteString("\n")
+	sb.WriteString("Press " + keyStyle.Render("r") + " to reload after editing.")
+	sb.WriteString("\n\n")
+
+	// Section: what's configurable.
+	sb.WriteString(titleStyle.Render("What's configurable"))
+	sb.WriteString("\n")
+	sb.WriteString(strings.Repeat("─", min(t.width, 70)))
+	sb.WriteString("\n")
+	sb.WriteString(renderConfigSchema())
+	sb.WriteString("\n\n")
+
+	// Section: example.
+	sb.WriteString(titleStyle.Render("Example (will be written when you press 'e')"))
+	sb.WriteString("\n")
+	sb.WriteString(strings.Repeat("─", min(t.width, 70)))
+	sb.WriteString("\n")
+	sb.WriteString(renderExampleTOML(t.width))
+	sb.WriteString("\n\n")
+
+	sb.WriteString(renderControlHelp(t.width))
+
+	return lipgloss.NewStyle().
+		Width(max(0, t.width)).
+		Height(max(0, t.height)).
+		Render(sb.String())
+}
+
+// renderConfigSchema renders a compact reference of the available settings.
+// Mirrors the structure of policy_example.toml but in tabular form.
+func renderConfigSchema() string {
+	keyStyle := lipgloss.NewStyle().Foreground(colorPrimary)
+	descStyle := lipgloss.NewStyle().Foreground(colorText)
+	var sb strings.Builder
+	rows := []struct {
+		key, desc string
+	}{
+		{"[budget]", ""},
+		{"  session_max_usd", "USD cap per Claude Code session (0 = unlimited)"},
+		{"  daily_max_usd", "USD cap per UTC day across all sessions"},
+		{"  warn_at_fraction", "Warn (not block) at this fraction (e.g. 0.8 = 80%)"},
+		{"[tools]", ""},
+		{"  denylist", "Glob patterns to block — e.g. \"Bash:rm -rf*\""},
+		{"  allowlist", "If non-empty, ONLY these patterns are allowed"},
+		{"[models.pricing]", ""},
+		{"  <model> = {input=N,output=N}", "Per-model price (USD per 1M tokens)"},
+	}
+	for _, r := range rows {
+		if r.desc == "" {
+			sb.WriteString(keyStyle.Render(r.key))
+			sb.WriteString("\n")
+		} else {
+			sb.WriteString(fmt.Sprintf("  %s  %s\n",
+				keyStyle.Render(fmt.Sprintf("%-32s", strings.TrimPrefix(r.key, "  "))),
+				descStyle.Render(r.desc)))
+		}
+	}
+	return sb.String()
+}
+
+// renderExampleTOML renders the embedded policy_example.toml with dim
+// styling so it visually separates from "what you'd type".
+func renderExampleTOML(width int) string {
+	style := lipgloss.NewStyle().Foreground(colorDim)
+	lines := strings.Split(examplePolicyTOML, "\n")
+	// Trim to a reasonable preview (avoid scroll overflow on small terminals).
+	const maxLines = 24
+	if len(lines) > maxLines {
+		lines = append(lines[:maxLines], style.Render("  …"))
+	}
+	return style.Render(strings.Join(lines, "\n"))
+}
+
+// renderControlHelp renders a k9s-style key reference footer.
+func renderControlHelp(width int) string {
+	keyStyle := lipgloss.NewStyle().Foreground(colorSuccess).Bold(true)
+	descStyle := lipgloss.NewStyle().Foreground(colorDim)
+	pairs := []struct{ k, d string }{
+		{"e", "edit policy"},
+		{"r", "reload"},
+		{"c", "clear denial log"},
+	}
+	var parts []string
+	for _, p := range pairs {
+		parts = append(parts, keyStyle.Render("<"+p.k+">")+" "+descStyle.Render(p.d))
+	}
+	return strings.Join(parts, "  ")
 }
 
 func (t ControlTab) SetSize(width, height int) TabModel {
