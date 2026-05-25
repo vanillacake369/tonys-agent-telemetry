@@ -5,6 +5,8 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/event"
@@ -44,6 +46,18 @@ func main() {
 	}
 
 	p := tea.NewProgram(tui.NewApp(), tea.WithAltScreen())
+
+	// SIGTERM/SIGHUP: gracefully ask Bubbletea to quit so the terminal is
+	// restored cleanly (alt-screen exit + raw mode reset). Without this, a
+	// kill or SSH disconnect leaves the terminal in a corrupted state.
+	// SIGINT is handled internally by Bubbletea.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGHUP)
+	go func() {
+		<-sigCh
+		p.Quit()
+	}()
+
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
