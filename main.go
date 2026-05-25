@@ -57,22 +57,24 @@ func main() {
 	}
 
 	// Start the telemetry registry. Currently registers the Claude Code
-	// adapter only; vLLM / Ollama / OTLP receivers will join later. The
-	// span channel is drained for now (no UI consumer yet); the DAG tab
-	// will take over when implemented.
+	// adapter only; vLLM / Ollama / OTLP receivers will join later.
 	telCtx, telCancel := context.WithCancel(context.Background())
 	defer telCancel()
 	reg := telemetry.NewRegistry()
 	reg.Register(claudecode.New())
 	spans := make(chan telemetry.Span, 256)
 	go reg.StartAll(telCtx, spans)
-	go func() {
-		for range spans {
-			// discard until a consumer takes over
-		}
-	}()
 
 	p := tea.NewProgram(tui.NewApp(), tea.WithAltScreen())
+
+	// Route collected spans into Bubbletea as SpanCollectedMsg so the
+	// DAG tab (and any future consumer) receives them via the normal
+	// message loop.
+	go func() {
+		for sp := range spans {
+			p.Send(tui.SpanCollectedMsg{Span: sp})
+		}
+	}()
 
 	// SIGTERM/SIGHUP: gracefully ask Bubbletea to quit so the terminal is
 	// restored cleanly (alt-screen exit + raw mode reset). Without this, a
