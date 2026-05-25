@@ -49,10 +49,12 @@ func (i *Ingestor) Detect(ctx context.Context) bool {
 	return err == nil && info.IsDir()
 }
 
-// Ingest is the long-running ingest loop. The MVP returns immediately when
-// ctx is cancelled and emits no spans; backfill/live-tail implementations
-// will land in subsequent commits without changing this signature.
+// Ingest runs the backfill pass (historical Spans from ~/.claude/projects)
+// and then blocks until ctx is cancelled. Live-tailing of the hook FIFO is
+// not yet wired here; the existing TUI continues to consume FIFO events
+// directly via internal/event during the transition.
 func (i *Ingestor) Ingest(ctx context.Context, out chan<- telemetry.Span) error {
+	_ = i.backfill(ctx, out)
 	<-ctx.Done()
 	return ctx.Err()
 }
