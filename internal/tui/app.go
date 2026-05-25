@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/event"
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/telemetry"
 )
 
 // Tab represents the active tab in the TUI.
@@ -60,6 +61,9 @@ type App struct {
 	fifoEvents    <-chan event.Event // nil when FIFO is not active
 	fifoCtx       context.Context
 	fifoCancel    context.CancelFunc
+	// Telemetry registry and span channel — populated by S1.3; ignored until S2.
+	telReg   *telemetry.Registry
+	telSpans <-chan telemetry.Span
 }
 
 const (

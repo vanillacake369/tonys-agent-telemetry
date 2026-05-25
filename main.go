@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -11,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	xterm "github.com/charmbracelet/x/term"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/event"
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/telemetry"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/tui"
 )
 
@@ -50,6 +52,13 @@ func main() {
 	if err := event.CreateFIFO(); err == nil {
 		defer event.RemoveFIFO()
 	}
+
+	// Telemetry registry — no ingestors registered yet (S2 wires ClaudeCodeIngestor).
+	reg := telemetry.NewRegistry()
+	spans := make(chan telemetry.Span, 64)
+	ctx, cancelTel := context.WithCancel(context.Background())
+	defer cancelTel()
+	go reg.StartAll(ctx, spans)
 
 	app := tui.NewApp()
 	p := tea.NewProgram(app, tea.WithAltScreen())
