@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
+	xterm "github.com/charmbracelet/x/term"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/event"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/tui"
 )
@@ -25,6 +26,11 @@ func main() {
 			printUsage()
 			return
 		}
+	}
+
+	if !xterm.IsTerminal(os.Stdout.Fd()) {
+		fmt.Fprintln(os.Stderr, "tonys-agent-telemetry: stdout is not a terminal (TUI requires a tty)")
+		os.Exit(1)
 	}
 
 	// Suppress log output during TUI — stderr corrupts the alt screen.
