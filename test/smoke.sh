@@ -110,6 +110,43 @@ else
 fi
 
 echo ""
+echo "=== T9: App.Update routes load-messages to owning tabs ==="
+set +e
+out=$(go test -run 'TestApp_Routes' -count=1 -v -race ./internal/tui/ 2>&1)
+rc=$?
+set -e
+if [[ $rc == 0 && "$out" =~ PASS ]]; then
+    routes_passed=$(grep -c '^--- PASS' <<< "$out")
+    ok "App routes $routes_passed message types to correct tabs"
+else
+    bad "routing: $out"
+fi
+
+echo ""
+echo "=== T10: Hooks/Control tabs auto-load (not stuck in loading) ==="
+set +e
+out=$(go test -run 'TestApp_HooksLoadingStartsTrueResolvesToFalse|TestApp_RoutesHooksLoadedMsg|TestApp_RoutesControlRefreshMsg' -count=1 -v ./internal/tui/ 2>&1)
+rc=$?
+set -e
+if [[ $rc == 0 && "$out" =~ PASS ]]; then
+    ok "Hooks + Control tabs leave loading state on first Init"
+else
+    bad "auto-load: $out"
+fi
+
+echo ""
+echo "=== T11: DAG tab receives spans via App.Update routing ==="
+set +e
+out=$(go test -run 'TestApp_RoutesSpanBatchMsg|TestApp_RoutesSpanCollectedMsg' -count=1 -v ./internal/tui/ 2>&1)
+rc=$?
+set -e
+if [[ $rc == 0 && "$out" =~ PASS ]]; then
+    ok "DAG tab receives both single and batch span messages"
+else
+    bad "DAG routing: $out"
+fi
+
+echo ""
 echo "=== Summary ==="
 echo "  passed: $PASS"
 echo "  failed: $FAIL"
