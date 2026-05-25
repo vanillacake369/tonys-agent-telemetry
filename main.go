@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -19,7 +20,9 @@ import (
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/provider/ollama"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/provider/otlp"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/provider/vllm"
+	internalsignal "github.com/vanillacake369/tonys-agent-telemetry/internal/signal"
 	sinkotlp "github.com/vanillacake369/tonys-agent-telemetry/internal/sink/otlp"
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/skill"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/snapshot"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/telemetry"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/tui"
@@ -77,6 +80,8 @@ func main() {
 		"Append every collected span to this JSONL file for later replay/debug.")
 	replayFile := flag.String("replay", "",
 		"Read spans from this JSONL file instead of starting live providers.")
+	emitSignals := flag.Bool("emit-signals", false,
+		"Extract behavioral signals from ingested spans, write JSON array to stdout, then exit (no TUI).")
 
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -89,6 +94,14 @@ func main() {
 		}
 	}
 	flag.Parse()
+
+	// --emit-signals: ingest spans (from replay file or live providers for a
+	// brief window), extract behavioral signals, write JSON array to stdout,
+	// then exit cleanly. No TUI is opened; stdout need not be a tty.
+	if *emitSignals {
+		runEmitSignals(*replayFile)
+		return
+	}
 
 	// Suppress log output during TUI — stderr corrupts the alt screen.
 	// Use --debug flag or TAT_DEBUG=1 to enable logging to a file.
@@ -182,6 +195,80 @@ func main() {
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// runEmitSignals implements the --emit-signals path (SIGNALS_SPEC §4):
+//
+//  1. Ingests spans from replayFile (if set) or from live providers (5s window).
+//  2. Calls skill.ScanLocal() and passes names into ExtractOpts.InstalledSkills.
+//  3. Calls signal.Extract on the collected forest.
+//  4. Writes the result as a JSON array to stdout (one call = one array, not NDJSON).
+//  5. Exits with code 0 on success, non-zero on error.
+//
+// The output format is a top-level JSON array (not NDJSON) so that downstream
+// tools like jq can process the full list without line-splitting concerns.
+// Empty result writes "[]" per SIGNALS_SPEC §4.
+func runEmitSignals(replayFile string) {
+	log.SetOutput(io.Discard) // silence provider logs; only JSON goes to stdout
+
+	ingestCtx, ingestCancel := context.WithCancel(context.Background())
+	defer ingestCancel()
+	spansCh := make(chan telemetry.Span, 4096)
+
+	if replayFile != "" {
+		go func() {
+			defer close(spansCh)
+			_ = snapshot.NewPlayer(replayFile).Run(ingestCtx, spansCh)
+		}()
+	} else {
+		// Live mode: collect for a short window so the flag is useful without
+		// a replay file. 5 seconds is enough for a quick smoke test.
+		const liveWindow = 5 * time.Second
+		reg := telemetry.NewRegistry()
+		reg.Register(claudecode.New())
+		reg.Register(otlp.New())
+		reg.Register(vllm.New())
+		reg.Register(ollama.New())
+		timeoutCtx, timeoutCancel := context.WithTimeout(ingestCtx, liveWindow)
+		defer timeoutCancel()
+		go func() {
+			defer close(spansCh)
+			reg.StartAll(timeoutCtx, spansCh)
+		}()
+	}
+
+	// Drain spans into a flat slice.
+	var allSpans []telemetry.Span
+	for sp := range spansCh {
+		allSpans = append(allSpans, sp)
+	}
+
+	// Build forest from collected spans.
+	forest := telemetry.BuildForests(allSpans)
+
+	// Resolve installed skills (pure caller responsibility per spec §3.3).
+	opts := internalsignal.DefaultExtractOpts()
+	if localSkills, err := skill.ScanLocal(); err == nil {
+		names := make([]string, 0, len(localSkills))
+		for _, s := range localSkills {
+			names = append(names, s.Name)
+		}
+		opts.InstalledSkills = names
+	}
+
+	signals := internalsignal.Extract(forest, opts)
+
+	// Ensure JSON serializes as "[]" not "null" for empty results.
+	if signals == nil {
+		signals = []internalsignal.Signal{}
+	}
+
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(signals); err != nil {
+		fmt.Fprintf(os.Stderr, "tonys-agent-telemetry: --emit-signals encode error: %v\n", err)
 		os.Exit(1)
 	}
 }
