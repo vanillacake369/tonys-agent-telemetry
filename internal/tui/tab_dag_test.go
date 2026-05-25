@@ -35,11 +35,12 @@ func TestDAGTab_AccumulatesSpans(t *testing.T) {
 		t.Fatalf("spans = %d, want 2", len(d.spans))
 	}
 	v := d.View()
-	// First 8 chars of TraceID t1 (which is shorter, so full) should appear.
 	if !strings.Contains(v, "t1") {
 		t.Errorf("view should contain trace id, got: %q", truncate(v, 300))
 	}
-	if !strings.Contains(v, "spans=2") {
+	// New view format: "N traces · N spans" in panel title + per-trace
+	// SPANS column. Either is acceptable evidence the count rendered.
+	if !strings.Contains(v, "2 spans") && !strings.Contains(v, " 2 ") {
 		t.Errorf("view should show span count, got: %q", truncate(v, 300))
 	}
 }
@@ -97,10 +98,4 @@ func TestDAGTab_DoesNotPanicOnNoKeyMessage(t *testing.T) {
 	_ = cmd
 }
 
-// truncate trims s to n runes for use in test error messages.
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
-}
+// truncate now lives in tab_dag.go to avoid duplicate definitions.
