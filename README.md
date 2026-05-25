@@ -11,10 +11,22 @@ TUI dashboard for Claude Code sessions, agents, DAG visualization, and skill mar
 ## Features
 
 - **Sessions** — Fuzzy-find and resume past Claude Code sessions; fork or continue any session
-- **Agents** — Browse and launch configured agents from a searchable list
-- **DAG** — Live agent orchestration graph showing real-time tool calls and sub-agent delegation
 - **Skills** — Search the skill marketplace (local and GitHub-sourced skills with fuzzy filtering)
+- **Cost** — Aggregated cost/usage dashboard by provider, model, project
+- **Hooks** — Visualize Claude Code hook configuration (`~/.claude/settings.json`) with workflow diagram
+- **DAG** — Live agent orchestration graph across all detected providers (Claude Code, vLLM, Ollama, anything OTel-emitting)
 - **Control** — Runtime governance: per-session/per-day USD budget caps, tool allow/denylists, live denial log
+
+### Auto-detected providers (Phase 3)
+
+Launch the TUI; each provider runs only if detected:
+
+| Provider | Detection | Telemetry |
+|----------|-----------|-----------|
+| **Claude Code** | `~/.claude/projects/` | Backfill from JSONL + live hook events |
+| **OTLP/HTTP** | `:4318` bindable | Receives spans from LangGraph, CrewAI, AutoGen, OpenAI Agents SDK, LiteLLM, TGI, OpenRouter, Letta, smolagents, etc. |
+| **vLLM** | `:8000/metrics` returns `vllm:` prefix | Prometheus scrape, per-model token deltas |
+| **Ollama** | `:11434/api/tags` returns JSON with `models` | Poll `/api/ps` for loaded models |
 
 ## Installation
 
