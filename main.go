@@ -5,6 +5,8 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/event"
@@ -44,6 +46,14 @@ func main() {
 	}
 
 	p := tea.NewProgram(tui.NewApp(), tea.WithAltScreen())
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGHUP)
+	go func() {
+		<-sigChan
+		p.Quit()
+	}()
+
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
