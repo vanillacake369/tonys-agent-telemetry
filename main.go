@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -11,6 +12,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/term"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/event"
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/provider/claudecode"
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/telemetry"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/tui"
 )
 
@@ -52,6 +55,22 @@ func main() {
 	if err := event.CreateFIFO(); err == nil {
 		defer event.RemoveFIFO()
 	}
+
+	// Start the telemetry registry. Currently registers the Claude Code
+	// adapter only; vLLM / Ollama / OTLP receivers will join later. The
+	// span channel is drained for now (no UI consumer yet); the DAG tab
+	// will take over when implemented.
+	telCtx, telCancel := context.WithCancel(context.Background())
+	defer telCancel()
+	reg := telemetry.NewRegistry()
+	reg.Register(claudecode.New())
+	spans := make(chan telemetry.Span, 256)
+	go reg.StartAll(telCtx, spans)
+	go func() {
+		for range spans {
+			// discard until a consumer takes over
+		}
+	}()
 
 	p := tea.NewProgram(tui.NewApp(), tea.WithAltScreen())
 
