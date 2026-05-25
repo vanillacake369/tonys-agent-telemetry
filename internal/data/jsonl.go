@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -45,11 +46,11 @@ type rawUsage struct {
 
 // rawContentBlock is one element of a content array.
 type rawContentBlock struct {
-	Type    string          `json:"type"`
-	Text    string          `json:"text"`
-	Thinking string         `json:"thinking"`
-	Name    string          `json:"name"`
-	Input   json.RawMessage `json:"input"`
+	Type     string          `json:"type"`
+	Text     string          `json:"text"`
+	Thinking string          `json:"thinking"`
+	Name     string          `json:"name"`
+	Input    json.RawMessage `json:"input"`
 }
 
 // rawAgentInput is the input to the "Agent" tool_use.
@@ -63,24 +64,6 @@ type rawAgentInput struct {
 type Turn struct {
 	Role    string // "user" or "assistant"
 	Content string // truncated text
-}
-
-// DetailTurn is a full-fidelity turn for the detail view.
-type DetailTurn struct {
-	Role       string     // "user", "assistant", "system"
-	Content    string     // full text content
-	Thinking   string     // thinking block content (assistant only)
-	ToolCalls  []ToolCall // tool invocations (assistant only)
-	Model      string     // model used (assistant only)
-	TokensIn   int        // input tokens (assistant only)
-	TokensOut  int        // output tokens (assistant only)
-	Timestamp  string     // original timestamp
-}
-
-// ToolCall represents a single tool invocation within a turn.
-type ToolCall struct {
-	Name  string // e.g. "Bash", "Read", "Edit"
-	Input string // truncated input/arguments
 }
 
 const maxFirstPromptLen = 100
@@ -102,14 +85,6 @@ func truncate(s string, n int) string {
 	}
 	runes := []rune(s)
 	return string(runes[:n])
-}
-
-// systemTagRe matches XML-like system tags that appear in user messages.
-var systemTagRe = regexp.MustCompile(`<(?:system-reminder|local-command-caveat|task-notification|command-\w+)[^>]*>[\s\S]*?</(?:system-reminder|local-command-caveat|task-notification|command-\w+)>`)
-
-// stripSystemTags removes system-injected XML tags from user message text.
-func stripSystemTags(s string) string {
-	return strings.TrimSpace(systemTagRe.ReplaceAllString(s, ""))
 }
 
 // extractTextFromContent extracts plain text from a content value that is
@@ -147,9 +122,16 @@ func extractTextFromContent(raw json.RawMessage, skipThinking bool) string {
 	return strings.Join(parts, "\n")
 }
 
-// ParseSessionHeader reads the entire JSONL file to extract session metadata
-// and compute session statistics (turn count, duration).
-// Corrupted lines are skipped. Missing fields are zero values.
+// newJSONLScanner returns a bufio.Scanner with 1 MiB buffer — shared helper
+// replacing the 7 inline copies of the same pattern.
+func newJSONLScanner(f *os.File) *bufio.Scanner {
+	s := bufio.NewScanner(f)
+	s.Buffer(make([]byte, 1<<20), 1<<20)
+	return s
+}
+
+// ParseSessionHeader reads the first few lines of a JSONL file to extract
+// session metadata. Corrupted lines are skipped. Missing fields are zero values.
 // Returns an error only if the file cannot be opened or contains no usable data.
 func ParseSessionHeader(filepath string) (*Session, error) {
 	f, err := os.Open(filepath)
@@ -160,15 +142,7 @@ func ParseSessionHeader(filepath string) (*Session, error) {
 
 	session := &Session{FilePath: filepath}
 	foundAny := false
-	var lastTimestamp time.Time
-	var searchParts []string
-	var searchTextLen int
-	const maxSearchTextLen = 20000 // 20KB cap — covers ~500 turns at 40 chars each
-	const maxPerTurn = 80          // chars per turn for search indexing
-	scanner := bufio.NewScanner(f)
-	// Increase buffer size for long lines.
-	buf := make([]byte, 1<<20)
-	scanner.Buffer(buf, 1<<20)
+	scanner := newJSONLScanner(f)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -193,11 +167,8 @@ func ParseSessionHeader(filepath string) (*Session, error) {
 		if msg.Version != "" && session.Version == "" {
 			session.Version = msg.Version
 		}
-		if ts := parseTimestamp(msg.Timestamp); !ts.IsZero() {
-			if session.Timestamp.IsZero() {
-				session.Timestamp = ts
-			}
-			lastTimestamp = ts
+		if ts := parseTimestamp(msg.Timestamp); !ts.IsZero() && session.Timestamp.IsZero() {
+			session.Timestamp = ts
 		}
 
 		// Extract model from assistant messages.
@@ -207,30 +178,23 @@ func ParseSessionHeader(filepath string) (*Session, error) {
 			}
 		}
 
-		// Count user turns, extract prompts, and build search text.
-		if msg.Type == "user" && msg.Message != nil {
-			session.TurnCount++
+		// Extract first user prompt. Newlines are replaced with spaces
+		// to prevent multi-line list items from breaking TUI layout.
+		if msg.Type == "user" && msg.Message != nil && session.FirstPrompt == "" {
 			text := extractTextFromContent(msg.Message.Content, false)
 			text = strings.ReplaceAll(text, "\n", " ")
 			text = strings.ReplaceAll(text, "\r", "")
-
 			if text != "" {
-				// Strip system tags that waste search space.
-				text = stripSystemTags(text)
-
-				if session.FirstPrompt == "" {
-					session.FirstPrompt = truncate(text, maxFirstPromptLen)
-				}
-				// Collect user messages for full-text search.
-				if searchTextLen < maxSearchTextLen {
-					chunk := truncate(text, maxPerTurn)
-					searchParts = append(searchParts, chunk)
-					searchTextLen += len(chunk)
-				}
+				session.FirstPrompt = truncate(text, maxFirstPromptLen)
 			}
 		}
 
 		foundAny = true
+
+		// Stop early once we have all fields.
+		if session.ID != "" && session.CWD != "" && session.Model != "" && session.FirstPrompt != "" {
+			break
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -242,14 +206,6 @@ func ParseSessionHeader(filepath string) (*Session, error) {
 
 	if !foundAny {
 		return nil, fmt.Errorf("no usable data in %s", filepath)
-	}
-
-	// Build search text from all collected user messages.
-	session.SearchText = strings.Join(searchParts, " ")
-
-	// Compute duration from first to last observed timestamp.
-	if !session.Timestamp.IsZero() && lastTimestamp.After(session.Timestamp) {
-		session.Duration = lastTimestamp.Sub(session.Timestamp)
 	}
 
 	return session, nil
@@ -267,9 +223,7 @@ func ParseConversationPreview(filepath string, maxTurns int) ([]Turn, error) {
 
 	const maxContentLen = 300
 	var turns []Turn
-	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 1<<20)
-	scanner.Buffer(buf, 1<<20)
+	scanner := newJSONLScanner(f)
 
 	for scanner.Scan() && len(turns) < maxTurns {
 		line := strings.TrimSpace(scanner.Text())
@@ -295,191 +249,11 @@ func ParseConversationPreview(filepath string, maxTurns int) ([]Turn, error) {
 			Content: truncate(text, maxContentLen),
 		})
 	}
-	// Ignore scanner.Err() for truncated-line tolerance.
-
-	return turns, nil
-}
-
-// ParseFullConversation reads a Claude session JSONL and returns all turns
-// with full content, thinking blocks, and tool calls.
-func ParseFullConversation(filepath string) ([]DetailTurn, error) {
-	f, err := os.Open(filepath)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	const maxToolInputLen = 200
-	var turns []DetailTurn
-	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 1<<20)
-	scanner.Buffer(buf, 1<<20)
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var msg rawMessage
-		if err := json.Unmarshal([]byte(line), &msg); err != nil {
-			continue
-		}
-		if msg.Type != "user" && msg.Type != "assistant" {
-			continue
-		}
-		if msg.Message == nil {
-			continue
-		}
-
-		dt := DetailTurn{
-			Role:      msg.Type,
-			Timestamp: msg.Timestamp,
-		}
-
-		if msg.Type == "assistant" && msg.Message.Model != "" {
-			dt.Model = msg.Message.Model
-		}
-		if msg.Type == "assistant" && msg.Message.Usage != nil {
-			dt.TokensIn = msg.Message.Usage.InputTokens
-			dt.TokensOut = msg.Message.Usage.OutputTokens
-		}
-
-		// Parse content blocks.
-		var blocks []rawContentBlock
-		if err := json.Unmarshal(msg.Message.Content, &blocks); err == nil {
-			var textParts []string
-			for _, b := range blocks {
-				switch b.Type {
-				case "text":
-					if b.Text != "" {
-						textParts = append(textParts, b.Text)
-					}
-				case "thinking":
-					if b.Thinking != "" {
-						dt.Thinking = b.Thinking
-					}
-				case "tool_use":
-					tc := ToolCall{Name: b.Name}
-					if len(b.Input) > 0 {
-						inputStr := string(b.Input)
-						if len(inputStr) > maxToolInputLen {
-							inputStr = inputStr[:maxToolInputLen] + "…"
-						}
-						tc.Input = inputStr
-					}
-					dt.ToolCalls = append(dt.ToolCalls, tc)
-				}
-			}
-			dt.Content = strings.Join(textParts, "\n")
-		} else {
-			// Content is a plain string.
-			dt.Content = extractTextFromContent(msg.Message.Content, false)
-		}
-
-		if dt.Content == "" && dt.Thinking == "" && len(dt.ToolCalls) == 0 {
-			continue
-		}
-
-		turns = append(turns, dt)
+	if err := scanner.Err(); err != nil {
+		log.Printf("claudecode: scanner error in %s: %v", filepath, err)
 	}
 
 	return turns, nil
-}
-
-// FileChange represents a file that was accessed or modified during a session.
-type FileChange struct {
-	Path   string
-	Action string // "write", "edit", or "read"
-}
-
-// actionRank maps action names to precedence for deduplication.
-// Higher rank wins when the same file appears multiple times.
-var actionRank = map[string]int{
-	"write": 3,
-	"edit":  2,
-	"read":  1,
-}
-
-// ParseFileChanges extracts unique file paths from tool_use events in the JSONL.
-// For each tool_use with name "Edit", "Write", or "Read", input.file_path is extracted.
-// When the same path appears multiple times, write > edit > read takes precedence.
-// Results are returned in first-occurrence order.
-func ParseFileChanges(filepath string) ([]FileChange, error) {
-	f, err := os.Open(filepath)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	// Track order of first occurrence and best action per path.
-	type entry struct {
-		action string
-		order  int
-	}
-	seen := map[string]entry{}
-	var order int
-
-	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 1<<20)
-	scanner.Buffer(buf, 1<<20)
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var msg rawMessage
-		if err := json.Unmarshal([]byte(line), &msg); err != nil {
-			continue
-		}
-		if msg.Type != "assistant" || msg.Message == nil {
-			continue
-		}
-		var blocks []rawContentBlock
-		if err := json.Unmarshal(msg.Message.Content, &blocks); err != nil {
-			continue
-		}
-		for _, block := range blocks {
-			if block.Type != "tool_use" {
-				continue
-			}
-			var action string
-			switch block.Name {
-			case "Write":
-				action = "write"
-			case "Edit", "MultiEdit":
-				action = "edit"
-			case "Read":
-				action = "read"
-			default:
-				continue
-			}
-			// Extract file_path from the tool input.
-			var input struct {
-				FilePath string `json:"file_path"`
-			}
-			if err := json.Unmarshal(block.Input, &input); err != nil || input.FilePath == "" {
-				continue
-			}
-			if prev, exists := seen[input.FilePath]; exists {
-				// Keep higher-rank action.
-				if actionRank[action] > actionRank[prev.action] {
-					seen[input.FilePath] = entry{action: action, order: prev.order}
-				}
-			} else {
-				seen[input.FilePath] = entry{action: action, order: order}
-				order++
-			}
-		}
-	}
-	// Ignore scanner.Err() for truncated-line tolerance.
-
-	// Build result slice in first-occurrence order.
-	result := make([]FileChange, len(seen))
-	for path, e := range seen {
-		result[e.order] = FileChange{Path: path, Action: e.action}
-	}
-	return result, nil
 }
 
 // agentTaskStatus maps a task ID to its completion status from queue-operation events.
@@ -539,9 +313,7 @@ func ParseDAG(sessionFilePath string) (*DAGNode, error) {
 		if err != nil {
 			return nil, err
 		}
-		scanner := bufio.NewScanner(f)
-		buf := make([]byte, 1<<20)
-		scanner.Buffer(buf, 1<<20)
+		scanner := newJSONLScanner(f)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
@@ -568,9 +340,7 @@ func ParseDAG(sessionFilePath string) (*DAGNode, error) {
 		if err != nil {
 			return nil, err
 		}
-		scanner := bufio.NewScanner(f)
-		buf := make([]byte, 1<<20)
-		scanner.Buffer(buf, 1<<20)
+		scanner := newJSONLScanner(f)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
@@ -700,9 +470,7 @@ func readSubagentStats(path string) (totalTokens int, tools []string) {
 	defer f.Close()
 
 	toolSet := map[string]struct{}{}
-	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 1<<20)
-	scanner.Buffer(buf, 1<<20)
+	scanner := newJSONLScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {

@@ -4,38 +4,34 @@ import (
 	"context"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/event"
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/telemetry"
 )
-
-// autoRefreshInterval is the period between automatic data refreshes.
-const autoRefreshInterval = 30 * time.Second
-
-// AutoRefreshMsg triggers a background refresh of session/cost data.
-type AutoRefreshMsg struct{}
 
 // Tab represents the active tab in the TUI.
 type Tab int
 
 const (
 	TabSessions Tab = iota
+	TabAgents
+	TabDAG
 	TabSkills
-	TabCost
 )
 
 // tabNames maps each Tab constant to its display label.
 var tabNames = map[Tab]string{
 	TabSessions: "Sessions",
+	TabAgents:   "Agents",
+	TabDAG:      "DAG",
 	TabSkills:   "Skills",
-	TabCost:     "Cost",
 }
 
 // tabOrder defines the left-to-right display order of tabs.
-var tabOrder = []Tab{TabSessions, TabSkills, TabCost}
+var tabOrder = []Tab{TabSessions, TabAgents, TabDAG, TabSkills}
 
 // TabModel is the interface that every tab sub-model must implement.
 // SetSize returns the updated model (value-receiver implementations must
@@ -62,9 +58,12 @@ type App struct {
 	height        int
 	searchFocused bool // when true, key events pass directly to the active tab
 	whichKey      WhichKeyOverlay
-	detailView    *DetailView // non-nil when detail overlay is open
 	fifoEvents    <-chan event.Event // nil when FIFO is not active
+	fifoCtx       context.Context
 	fifoCancel    context.CancelFunc
+	// Telemetry registry and span channel — populated by S1.3; ignored until S2.
+	telReg   *telemetry.Registry
+	telSpans <-chan telemetry.Span
 }
 
 const (
@@ -81,14 +80,27 @@ func NewApp() App {
 	keys := DefaultKeyMap()
 	tabs := map[Tab]TabModel{
 		TabSessions: NewSessionsTab(),
+		TabAgents:   NewAgentsTab(),
+		TabDAG:      NewDAGTab(),
 		TabSkills:   NewSkillsTab(),
-		TabCost:     NewCostTab(),
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	return App{
 		activeTab:     TabSessions,
 		tabs:          tabs,
 		keys:          keys,
 		searchFocused: false,
+		fifoCtx:       ctx,
+		fifoCancel:    cancel,
+	}
+}
+
+// CancelFIFO cancels the FIFO context, stopping any goroutines that listen for
+// real-time events. Safe to call multiple times. Called from main.go after
+// p.Run() returns as defense-in-depth alongside the QuitMsg intercept.
+func (a App) CancelFIFO() {
+	if a.fifoCancel != nil {
+		a.fifoCancel()
 	}
 }
 
@@ -102,49 +114,17 @@ func (a App) Init() tea.Cmd {
 
 	// Start listening for real-time events if the TUI FIFO exists.
 	if info, err := os.Stat(event.DefaultFIFOPath); err == nil && info.Mode()&os.ModeNamedPipe != 0 {
-		ctx, cancel := context.WithCancel(context.Background())
-		a.fifoCancel = cancel
-		a.fifoEvents = event.ReadFIFO(ctx)
-		cmds = append(cmds, event.ListenForEvents(ctx, a.fifoEvents))
+		a.fifoEvents = event.ReadFIFO(a.fifoCtx)
+		cmds = append(cmds, event.ListenForEvents(a.fifoCtx, a.fifoEvents))
 	}
-
-	// Start auto-refresh polling.
-	cmds = append(cmds, tea.Tick(autoRefreshInterval, func(time.Time) tea.Msg {
-		return AutoRefreshMsg{}
-	}))
 
 	return tea.Batch(cmds...)
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// ── Detail overlay intercepts everything when open ──
-	if a.detailView != nil {
-		switch msg := msg.(type) {
-		case tea.WindowSizeMsg:
-			a.width = msg.Width
-			a.height = msg.Height
-			a = a.propagateSize()
-			a.detailView.SetSize(a.width, a.height)
-			return a, nil
-		case tea.KeyMsg:
-			if msg.Type == tea.KeyCtrlC {
-				return a, tea.Quit
-			}
-			if key.Matches(msg, a.keys.Escape) || key.Matches(msg, a.keys.Quit) {
-				a.detailView = nil
-				return a, nil
-			}
-			dv, cmd := a.detailView.Update(msg)
-			a.detailView = &dv
-			return a, cmd
-		case DetailLoadedMsg:
-			dv, cmd := a.detailView.Update(msg)
-			a.detailView = &dv
-			return a, cmd
-		default:
-			dv, cmd := a.detailView.Update(msg)
-			a.detailView = &dv
-			return a, cmd
+	if _, ok := msg.(tea.QuitMsg); ok {
+		if a.fifoCancel != nil {
+			a.fifoCancel()
 		}
 	}
 
@@ -160,8 +140,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		updated, cmd := a.tabs[a.activeTab].Update(msg)
 		a.tabs[a.activeTab] = updated
 		var listenCmd tea.Cmd
-		if a.fifoEvents != nil {
-			listenCmd = event.ListenForEvents(context.Background(), a.fifoEvents)
+		if a.fifoEvents != nil && a.fifoCtx != nil {
+			listenCmd = event.ListenForEvents(a.fifoCtx, a.fifoEvents)
 		}
 		return a, tea.Batch(cmd, listenCmd)
 
@@ -169,22 +149,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// FIFO channel closed — stop subscribing.
 		a.fifoEvents = nil
 		return a, nil
-
-	case AutoRefreshMsg:
-		// Only refresh the active tab to avoid unnecessary work on hidden tabs.
-		var cmds []tea.Cmd
-		if cmd := a.tabs[a.activeTab].Init(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-		cmds = append(cmds, tea.Tick(autoRefreshInterval, func(time.Time) tea.Msg {
-			return AutoRefreshMsg{}
-		}))
-		return a, tea.Batch(cmds...)
-
-	case OpenDetailMsg:
-		dv := NewDetailView(msg.Session, a.width, a.height, msg.Query)
-		a.detailView = &dv
-		return a, dv.Init()
 
 	case tea.KeyMsg:
 		// Ctrl+C always quits, even when overlay or search is active.
@@ -211,11 +175,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Tab / Shift+Tab cycle tabs regardless of search focus.
 		if key.Matches(msg, a.keys.NextTab) {
-			a.activeTab = (a.activeTab + 1) % 3
+			a.activeTab = (a.activeTab + 1) % 4
 			return a, nil
 		}
 		if key.Matches(msg, a.keys.PrevTab) {
-			a.activeTab = (a.activeTab + 2) % 3
+			a.activeTab = (a.activeTab + 3) % 4
 			return a, nil
 		}
 
@@ -246,10 +210,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.activeTab = TabSessions
 			return a, nil
 		case key.Matches(msg, a.keys.Tab2):
-			a.activeTab = TabSkills
+			a.activeTab = TabAgents
 			return a, nil
 		case key.Matches(msg, a.keys.Tab3):
-			a.activeTab = TabCost
+			a.activeTab = TabDAG
+			return a, nil
+		case key.Matches(msg, a.keys.Tab4):
+			a.activeTab = TabSkills
 			return a, nil
 		case key.Matches(msg, a.keys.Quit):
 			return a, tea.Quit
@@ -261,28 +228,19 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, cmd
 	}
 
-	// Route non-key messages to the specific tab that handles them.
-	// This avoids 3x state mutations per message (broadcast anti-pattern).
-	switch msg.(type) {
-	case SessionsLoadedMsg, PreviewLoadedMsg, FileChangesLoadedMsg:
-		updated, cmd := a.tabs[TabSessions].Update(msg)
-		a.tabs[TabSessions] = updated
-		return a, cmd
-	case CostLoadedMsg:
-		updated, cmd := a.tabs[TabCost].Update(msg)
-		a.tabs[TabCost] = updated
-		return a, cmd
-	case LocalSkillsLoadedMsg, GitHubSkillsLoadedMsg, SkillsSearchResultMsg, SkillReadmeMsg,
-		skillsDebounceMsg, skillsGitHubDebounceMsg, AnalyzeExecuteMsg:
-		updated, cmd := a.tabs[TabSkills].Update(msg)
-		a.tabs[TabSkills] = updated
-		return a, cmd
-	default:
-		// Unknown messages go to active tab only.
-		updated, cmd := a.tabs[a.activeTab].Update(msg)
-		a.tabs[a.activeTab] = updated
-		return a, cmd
+	// Broadcast non-key messages to ALL tabs.
+	// Each tab's Init() fires at App startup, but the resulting messages
+	// (e.g. LocalSkillsLoadedMsg, SessionsLoadedMsg) arrive asynchronously.
+	// They must reach the tab that sent the Init(), not just the active tab.
+	var cmds []tea.Cmd
+	for tab, m := range a.tabs {
+		updated, cmd := m.Update(msg)
+		a.tabs[tab] = updated
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	}
+	return a, tea.Batch(cmds...)
 }
 
 func (a App) View() string {
@@ -312,11 +270,6 @@ func (a App) View() string {
 	full := outerStyle.
 		Width(innerW).
 		Render(inner)
-
-	// Render the detail overlay on top of everything.
-	if a.detailView != nil {
-		return a.detailView.View()
-	}
 
 	// Render the which-key overlay centered on top of the full view.
 	if a.whichKey.visible {
@@ -358,25 +311,28 @@ func (a App) propagateSize() App {
 func (a App) tabHints() string {
 	switch a.activeTab {
 	case TabSessions:
-		return "v:view  ↵:resume  f:fork  y:copy  r:refresh"
+		return "↵:resume  f:fork  y:copy  r:refresh"
+	case TabAgents:
+		return "↵:launch  y:copy  r:refresh"
+	case TabDAG:
+		return "◄►:switch  ↑↓:scroll"
 	case TabSkills:
 		return "↵:analyze  o:open  s:sort  y:copy  r:refresh"
-	case TabCost:
-		return "r:refresh"
 	}
 	return ""
 }
 
 // renderTabBar returns the tab bar string for the given active tab and total width.
-// Uses k9s/btop-style numbered tabs: "1:Sessions │ 2:Skills │ 3:Cost"
+// Uses k9s/btop-style numbered tabs: "1:Sessions │ 2:Agents │ 3:DAG │ 4:Skills"
 func renderTabBar(active Tab, width int) string {
 	tabDefs := []struct {
 		num string
 		tab Tab
 	}{
 		{"1", TabSessions},
-		{"2", TabSkills},
-		{"3", TabCost},
+		{"2", TabAgents},
+		{"3", TabDAG},
+		{"4", TabSkills},
 	}
 
 	var parts []string
@@ -400,7 +356,7 @@ func renderTabBar(active Tab, width int) string {
 }
 
 // renderStatusBar returns a single-line status bar showing mode indicator and key hints.
-// Format (normal): NORMAL │ 1:sessions 2:skills 3:cost │ <tab hints> │ /:search ?:help q:quit
+// Format (normal): NORMAL │ 1:sessions 2:agents 3:dag 4:skills │ <tab hints> │ /:search ?:help q:quit
 // Format (search): SEARCH │ type to filter │ esc:back
 func (a App) renderStatusBar(width int) string {
 	innerWidth := max(0, width-StatusBarStyle.GetHorizontalPadding())
@@ -427,7 +383,7 @@ func (a App) renderStatusBar(width int) string {
 		// Build from right to left, dropping sections if they don't fit.
 		// Priority: mode > tab hints > global hints > tab numbers
 		globalHint := "/ search  ? help  q quit"
-		tabNums := "1-3:tabs"
+		tabNums := "1-4:tabs"
 
 		// Try full version first
 		var parts []string

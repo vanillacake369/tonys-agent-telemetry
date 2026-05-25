@@ -2,7 +2,7 @@
   description = "TUI dashboard for Claude Code sessions, agents, DAG visualization, and skill marketplace";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable"; # nixos-unstable; pinned via flake.lock
     flake-utils.url = "github:numtide/flake-utils";
   };
 
