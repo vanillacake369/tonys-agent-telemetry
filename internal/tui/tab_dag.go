@@ -164,6 +164,11 @@ func (d *DAGTab) handleKeyGraph(msg tea.KeyMsg) (TabModel, tea.Cmd) {
 		if len(d.flatNodes) > 0 {
 			return d, d.editCmd(d.flatNodes[d.nodeCursor].Span)
 		}
+	case "r":
+		// Failsafe: clear the render cache so the next View() recomputes.
+		// Useful if a terminal-multiplexer pane resize was missed.
+		d.graphCache = ""
+		d.graphCacheKey = ""
 	}
 	return d, nil
 }
@@ -184,8 +189,14 @@ func (d *DAGTab) handleKeySpan(msg tea.KeyMsg) (TabModel, tea.Cmd) {
 	return d, nil
 }
 
-// SetSize implements TabModel.
+// SetSize implements TabModel. Resets the render cache so the next View()
+// reflows the graph for the new dimensions — critical for tmux/zellij
+// pane resizes which arrive as WindowSizeMsg → propagateSize → SetSize.
 func (d *DAGTab) SetSize(width, height int) TabModel {
+	if width != d.width || height != d.height {
+		d.graphCache = ""
+		d.graphCacheKey = ""
+	}
 	d.width = width
 	d.height = height
 	return d
@@ -425,7 +436,7 @@ func (d *DAGTab) renderGraphView() string {
 
 	help := d.renderHelp([]helpKey{
 		{"j/k", "select node"}, {"enter/l", "detail"}, {"y", "yank JSON"},
-		{"e", "edit copy"}, {"esc/h", "back to traces"},
+		{"e", "edit copy"}, {"r", "force redraw"}, {"esc/h", "back"},
 	})
 
 	return RenderPanel(
@@ -563,12 +574,30 @@ func (d *DAGTab) renderGraph(width int) string {
 		}
 	}
 
+	// Box dimensions adapt to panel width so the graph reflows correctly
+	// when the user resizes their tmux/zellij pane. nodeW shrinks toward
+	// a 12-char minimum before any single line exceeds the panel.
 	const (
-		nodeW = 22 // chars per box including borders (room for label)
-		nodeH = 3  // lines per box
-		hgap  = 6  // chars between columns (room for elbow)
-		vgap  = 1  // blank lines between rows
+		nodeH      = 3 // box height (lines)
+		hgap       = 4 // chars between columns (elbow space)
+		vgap       = 1 // blank lines between rows
+		nodeWMin   = 12
+		nodeWMax   = 28
+		nodeWIdeal = 22
 	)
+	// Pre-walk window maxCol to pick a box width that fits the panel.
+	// Available cols for boxes = width - hgap*maxCol (gaps).
+	// nodeW such that (maxCol+1)*nodeW + maxCol*hgap ≤ width.
+	nodeW := nodeWIdeal
+	if width > 0 {
+		// Compute maxCol of the FULL layout first; we'll narrow below.
+		fitCols := maxCol + 1
+		usable := width - hgap*maxCol
+		candidate := usable / fitCols
+		if candidate < nodeWIdeal {
+			nodeW = clampInt(candidate, nodeWMin, nodeWIdeal)
+		}
+	}
 	pitchX := nodeW + hgap
 	pitchY := nodeH + vgap
 
@@ -718,9 +747,71 @@ func (d *DAGTab) renderGraph(width int) string {
 		}
 	}
 	rendered := sb.String()
+	// Hard cap: even after dynamic nodeW, a deep chain can still exceed
+	// the panel. Truncate every line so lipgloss never has to wrap our
+	// box-drawing chars (which would garble the layout).
+	if width > 0 {
+		rendered = clipLinesToWidth(rendered, width)
+	}
 	d.graphCache = rendered
 	d.graphCacheKey = cacheKey
 	return rendered
+}
+
+// clipLinesToWidth truncates each line to the given char limit, appending
+// a "›" marker when content was clipped. Visible whitespace is preserved
+// so the box alignment within the visible region still reads correctly.
+func clipLinesToWidth(s string, max int) string {
+	if max <= 0 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		plain := stripAnsiSeq(line)
+		if len([]rune(plain)) <= max {
+			continue
+		}
+		// Truncate the plain form, append marker. For lines that contain
+		// lipgloss ANSI sequences this loses styling on the truncated
+		// portion — acceptable because clip is the fail-safe path.
+		runes := []rune(plain)
+		lines[i] = string(runes[:max-1]) + "›"
+	}
+	return strings.Join(lines, "\n")
+}
+
+// stripAnsiSeq removes ANSI escape sequences (kept local; tests use
+// stripAnsi). Defined here so the file is self-contained when tests
+// aren't compiled.
+func stripAnsiSeq(s string) string {
+	var b strings.Builder
+	i := 0
+	for i < len(s) {
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			j := i + 2
+			for j < len(s) && (s[j] < 0x40 || s[j] > 0x7e) {
+				j++
+			}
+			if j < len(s) {
+				j++
+			}
+			i = j
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 // drawBox writes a 3-row box border + label into the grid starting at (x, y).
