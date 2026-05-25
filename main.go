@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/term"
@@ -95,15 +96,12 @@ func main() {
 	p := tea.NewProgram(tui.NewApp(), tea.WithAltScreen())
 
 	// Fan-out: every collected span goes to (1) the TUI as a Bubbletea
-	// message, (2) an optional remote OTLP forwarder, (3) an optional
-	// snapshot recorder. Sinks consume from their own buffered channels
-	// so a slow remote endpoint can't block the producing pipeline.
+	// batch message, (2) an optional remote OTLP forwarder, (3) an optional
+	// snapshot recorder. Branches use blocking sends with large buffers so
+	// no span is silently dropped — backfills of tens of thousands of JSONL
+	// records are common.
 	tuiCh, exportCh, recordCh := splitChannel(telCtx, spans)
-	go func() {
-		for sp := range tuiCh {
-			p.Send(tui.SpanCollectedMsg{Span: sp})
-		}
-	}()
+	go runTUIBatcher(telCtx, tuiCh, p.Send)
 	if *exportURL != "" {
 		exp := sinkotlp.New(*exportURL)
 		go func() { _ = exp.Run(telCtx, exportCh) }()
@@ -172,13 +170,20 @@ Tabs (1-5 + Ctrl+G):
 }
 
 // splitChannel fans out a single Span source into three downstream channels
-// with their own buffers. Downstream consumers that block (e.g. slow remote
-// OTLP endpoint) don't backpressure the source — the buffer absorbs and
-// further spans are dropped only for that branch when it fills.
+// with generous buffers. All sends are BLOCKING — data integrity matters
+// more than liveness here, because backfills can produce tens of thousands
+// of spans in a burst and silent drops break the DAG tab.
+//
+// Trade-off: a genuinely stuck downstream (e.g. unreachable remote OTLP
+// endpoint that is somehow not honoring its HTTP timeout) will stall the
+// pipeline. The sink/otlp Exporter caps its HTTP calls at 5s so this is
+// bounded in practice. Local consumers (TUI batcher, snapshot recorder)
+// drain at memory speed.
 func splitChannel(ctx context.Context, in <-chan telemetry.Span) (tuiCh, exportCh, recordCh chan telemetry.Span) {
-	tuiCh = make(chan telemetry.Span, 256)
-	exportCh = make(chan telemetry.Span, 256)
-	recordCh = make(chan telemetry.Span, 256)
+	const bufSize = 4096
+	tuiCh = make(chan telemetry.Span, bufSize)
+	exportCh = make(chan telemetry.Span, bufSize)
+	recordCh = make(chan telemetry.Span, bufSize)
 	go func() {
 		defer close(tuiCh)
 		defer close(exportCh)
@@ -191,22 +196,69 @@ func splitChannel(ctx context.Context, in <-chan telemetry.Span) (tuiCh, exportC
 				if !ok {
 					return
 				}
-				// Each downstream gets non-blocking try-sends so one slow
-				// consumer cannot stall the others.
+				// Blocking sends: pipeline waits if a branch is full.
+				// Each select includes ctx.Done() to exit on shutdown.
 				select {
 				case tuiCh <- sp:
-				default:
+				case <-ctx.Done():
+					return
 				}
 				select {
 				case exportCh <- sp:
-				default:
+				case <-ctx.Done():
+					return
 				}
 				select {
 				case recordCh <- sp:
-				default:
+				case <-ctx.Done():
+					return
 				}
 			}
 		}
 	}()
 	return
+}
+
+// runTUIBatcher accumulates spans from tuiCh and dispatches them to the
+// Bubbletea program in batches. A single SpanBatchMsg per ~100ms keeps the
+// runtime's message queue happy under heavy backfill, while still feeling
+// live to a user watching new spans arrive.
+//
+// The send argument is a function (typically p.Send) so the batcher can be
+// tested without spinning up a full tea.Program.
+func runTUIBatcher(ctx context.Context, tuiCh <-chan telemetry.Span, send func(tea.Msg)) {
+	const (
+		flushInterval = 100 * time.Millisecond
+		maxBatch      = 512
+	)
+	var batch []telemetry.Span
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		snapshot := make([]telemetry.Span, len(batch))
+		copy(snapshot, batch)
+		batch = batch[:0]
+		send(tui.SpanBatchMsg{Spans: snapshot})
+	}
+	ticker := time.NewTicker(flushInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			flush()
+			return
+		case sp, ok := <-tuiCh:
+			if !ok {
+				flush()
+				return
+			}
+			batch = append(batch, sp)
+			if len(batch) >= maxBatch {
+				flush()
+			}
+		case <-ticker.C:
+			flush()
+		}
+	}
 }

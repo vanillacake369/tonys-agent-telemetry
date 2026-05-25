@@ -12,10 +12,18 @@ import (
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/telemetry"
 )
 
-// SpanCollectedMsg is sent by main.go for each Span produced by registered
-// ProviderIngestors. The active App routes it to the DAG tab.
+// SpanCollectedMsg is sent by main.go for a single Span. Kept for the
+// hot-path (live single events).
 type SpanCollectedMsg struct {
 	Span telemetry.Span
+}
+
+// SpanBatchMsg is sent by main.go for bursts of Spans (notably backfill
+// from JSONL files containing thousands of records). Bubbletea handles
+// one batch in a single Update tick, avoiding the message-queue overload
+// of N individual SpanCollectedMsg posts.
+type SpanBatchMsg struct {
+	Spans []telemetry.Span
 }
 
 // DAGTab visualizes collected Spans grouped by TraceID, using
@@ -38,6 +46,10 @@ func (d *DAGTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case SpanCollectedMsg:
 		d.spans = append(d.spans, msg.Span)
+		d.refreshViewport()
+		return d, nil
+	case SpanBatchMsg:
+		d.spans = append(d.spans, msg.Spans...)
 		d.refreshViewport()
 		return d, nil
 	case tea.KeyMsg:
