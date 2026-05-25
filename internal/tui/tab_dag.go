@@ -418,21 +418,47 @@ func (d *DAGTab) renderTracesView() string {
 // renderGraphView shows the selected trace as a left-to-right flow with
 // the currently-selected node highlighted, plus a right-pane preview of
 // the selected span's attributes.
+//
+// Width allocation must be exact: RenderPanel wraps content with Width(N),
+// and lipgloss wraps (not truncates) on overflow. Wrapped box-drawing
+// chars look broken to the user. The contract is:
+//
+//	leftPanel.width + spacer + rightPanel.width == d.width - 2 (panel border)
 func (d *DAGTab) renderGraphView() string {
 	if len(d.flatNodes) == 0 {
 		return RenderEmptyState("(no spans in this trace)", d.width, d.height)
 	}
 
-	leftW := d.width * 3 / 5
-	if leftW < 30 {
-		leftW = max(20, d.width-2)
+	// Total inner content area inside RenderPanel = d.width - 2 (the
+	// panel's left + right border characters).
+	contentBudget := d.width - 2
+	if contentBudget < 20 {
+		contentBudget = 20
 	}
-	rightW := max(0, d.width-leftW-3)
+
+	// Right pane is only useful if it has room for the span attribute
+	// labels (≈28 cols). Otherwise hide it and give all space to the graph.
+	const minRightPaneW = 28
+	const spacerW = 2 // visual gap between panes
+	leftW := contentBudget
+	rightW := 0
+	spacer := ""
+	if contentBudget >= minRightPaneW*2+spacerW {
+		// Both panes fit. Right takes ~40% (bounded by minRightPaneW).
+		rightW = contentBudget * 2 / 5
+		if rightW < minRightPaneW {
+			rightW = minRightPaneW
+		}
+		leftW = contentBudget - spacerW - rightW
+		spacer = "  "
+	}
 
 	leftPanel := d.renderGraph(leftW)
-	rightPanel := d.renderSelectedSpanCompact(rightW)
-
-	body := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, "  ", rightPanel)
+	body := leftPanel
+	if rightW > 0 {
+		rightPanel := d.renderSelectedSpanCompact(rightW)
+		body = lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, spacer, rightPanel)
+	}
 
 	help := d.renderHelp([]helpKey{
 		{"j/k", "select node"}, {"enter/l", "detail"}, {"y", "yank JSON"},
