@@ -10,6 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/event"
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/signalstore"
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/trends"
 )
 
 // autoRefreshInterval is the period between automatic data refreshes.
@@ -28,6 +30,7 @@ const (
 	TabHooks
 	TabDAG
 	TabControl
+	TabTrends
 )
 
 // tabNames maps each Tab constant to its display label.
@@ -38,10 +41,28 @@ var tabNames = map[Tab]string{
 	TabHooks:    "Hooks",
 	TabDAG:      "DAG",
 	TabControl:  "Control",
+	TabTrends:   "Trends",
 }
 
 // tabOrder defines the left-to-right display order of tabs.
-var tabOrder = []Tab{TabSessions, TabSkills, TabCost, TabHooks, TabDAG, TabControl}
+// SSoT: cycleTab and renderTabBar both derive from this slice so adding a new
+// tab requires editing one place, not three.
+var tabOrder = []Tab{TabSessions, TabSkills, TabCost, TabHooks, TabDAG, TabControl, TabTrends}
+
+// cycleTab returns the tab `delta` steps from `current` in tabOrder, wrapping.
+// delta = +1 advances, delta = -1 goes back. Used by NextTab/PrevTab handlers.
+func cycleTab(current Tab, delta int) Tab {
+	idx := 0
+	for i, t := range tabOrder {
+		if t == current {
+			idx = i
+			break
+		}
+	}
+	n := len(tabOrder)
+	next := (idx + delta + n) % n
+	return tabOrder[next]
+}
 
 // TabModel is the interface that every tab sub-model must implement.
 // SetSize returns the updated model (value-receiver implementations must
@@ -72,6 +93,13 @@ type App struct {
 	fifoEvents    <-chan event.Event // nil when FIFO is not active
 	fifoCtx       context.Context    // owns the lifecycle of fifo goroutines
 	fifoCancel    context.CancelFunc
+	// advisor is the debounced extract→recommend pipeline. It is updated
+	// on every SpanBatchMsg / SpanCollectedMsg after routing to TabDAG.
+	advisor *AdvisorPipeline
+
+	// trendsPersistence drives the periodic signal extraction and persistence
+	// to the signal store. Ticked by TrendsFlushTickMsg every FlushInterval.
+	trendsPersistence *TrendsPersistence
 }
 
 const (
@@ -93,12 +121,26 @@ func NewApp() App {
 		TabHooks:    NewHooksTab(),
 		TabDAG:      NewDAGTab(),
 		TabControl:  NewControlTab(),
+		TabTrends:   NewTrendsTab(),
+	}
+	store, err := signalstore.NewStore()
+	if err != nil {
+		// Persistence failures are non-fatal: the TUI still works, trends just
+		// won't accumulate. Log to stderr and use a no-op nil store guard.
+		// trendsPersistence is nil-safe via the flush guard in FlushCmd.
+		store = nil
+	}
+	var persistence *TrendsPersistence
+	if store != nil {
+		persistence = NewTrendsPersistence(store)
 	}
 	return App{
-		activeTab:     TabSessions,
-		tabs:          tabs,
-		keys:          keys,
-		searchFocused: false,
+		activeTab:         TabSessions,
+		tabs:              tabs,
+		keys:              keys,
+		searchFocused:     false,
+		advisor:           NewAdvisorPipeline(),
+		trendsPersistence: persistence,
 	}
 }
 
@@ -123,6 +165,11 @@ func (a App) Init() tea.Cmd {
 	cmds = append(cmds, tea.Tick(autoRefreshInterval, func(time.Time) tea.Msg {
 		return AutoRefreshMsg{}
 	}))
+
+	// Schedule the first periodic trends flush tick.
+	if a.trendsPersistence != nil {
+		cmds = append(cmds, a.trendsPersistence.NextTick())
+	}
 
 	return tea.Batch(cmds...)
 }
@@ -229,12 +276,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Tab / Shift+Tab cycle tabs regardless of search focus.
+		// Driven by tabOrder so new tabs (e.g. TabTrends) are automatically reachable.
 		if key.Matches(msg, a.keys.NextTab) {
-			a.activeTab = (a.activeTab + 1) % 6
+			a.activeTab = cycleTab(a.activeTab, +1)
 			return a, nil
 		}
 		if key.Matches(msg, a.keys.PrevTab) {
-			a.activeTab = (a.activeTab + 5) % 6
+			a.activeTab = cycleTab(a.activeTab, -1)
 			return a, nil
 		}
 
@@ -276,6 +324,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, a.keys.Tab5):
 			a.activeTab = TabDAG
 			return a, nil
+		case key.Matches(msg, a.keys.Tab6):
+			a.activeTab = TabTrends
+			// Trigger a trends aggregation load whenever the user navigates to
+			// the Trends tab. The sessionID is a fixed constant for the TUI process;
+			// a more elaborate scheme (per-project ID) is a Phase 4 follow-up.
+			return a, a.loadTrendsCmd()
 		case key.Matches(msg, a.keys.TabControl):
 			a.activeTab = TabControl
 			return a, nil
@@ -306,7 +360,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.tabs[TabCost] = updated
 		return a, cmd
 	case LocalSkillsLoadedMsg, GitHubSkillsLoadedMsg, SkillsSearchResultMsg, SkillReadmeMsg,
-		skillsDebounceMsg, skillsGitHubDebounceMsg, AnalyzeExecuteMsg:
+		skillsDebounceMsg, skillsGitHubDebounceMsg, AnalyzeExecuteMsg, CatalogLoadedMsg:
 		updated, cmd := a.tabs[TabSkills].Update(msg)
 		a.tabs[TabSkills] = updated
 		return a, cmd
@@ -321,7 +375,37 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SpanCollectedMsg, SpanBatchMsg:
 		updated, cmd := a.tabs[TabDAG].Update(msg)
 		a.tabs[TabDAG] = updated
+		// After updating the DAG tab, attempt to trigger the advisor pipeline.
+		// MaybeRun returns nil if debounce or span-delta conditions are not met.
+		// Contract: SpanProvider interface (see span_provider.go); compile-time
+		// assertion in that file guarantees *DAGTab satisfies it.
+		dagTab := a.tabs[TabDAG].(SpanProvider)
+		skillsTab := a.tabs[TabSkills].(SkillsTab)
+		installedNames := skillsTab.LocalSkillNames()
+		if advisorCmd := a.advisor.MaybeRun(dagTab.Spans(), skillsTab.CatalogItems(), installedNames); advisorCmd != nil {
+			return a, tea.Batch(cmd, advisorCmd)
+		}
 		return a, cmd
+	case RecommendationsReadyMsg:
+		updated, cmd := a.tabs[TabSkills].Update(msg)
+		a.tabs[TabSkills] = updated
+		return a, cmd
+	case TrendsLoadedMsg:
+		updated, cmd := a.tabs[TabTrends].Update(msg)
+		a.tabs[TabTrends] = updated
+		return a, cmd
+	case TrendsFlushTickMsg:
+		// Flush current spans to signal store, then re-schedule the next tick.
+		// Contract: SpanProvider interface (see span_provider.go).
+		var cmds []tea.Cmd
+		if a.trendsPersistence != nil {
+			dagTab := a.tabs[TabDAG].(SpanProvider)
+			if flushCmd := a.trendsPersistence.FlushCmd(tuiSessionID, dagTab.Spans()); flushCmd != nil {
+				cmds = append(cmds, flushCmd)
+			}
+			cmds = append(cmds, a.trendsPersistence.NextTick())
+		}
+		return a, tea.Batch(cmds...)
 	default:
 		// Unknown messages go to active tab only.
 		updated, cmd := a.tabs[a.activeTab].Update(msg)
@@ -399,6 +483,43 @@ func (a App) propagateSize() App {
 	return a
 }
 
+// tuiSessionID is the fixed session identifier used when persisting signals
+// from the running TUI process. A single TUI instance uses one session ID so
+// that buckets accumulate day-over-day in the same file. Per-project IDs are
+// a Phase 4 follow-up (requires deriving ID from the active project path).
+const tuiSessionID = "tui-session"
+
+// loadTrendsCmd returns a tea.Cmd that reads the signal store, aggregates
+// the last DefaultLookbackDays of buckets, and sends TrendsLoadedMsg.
+// If the store was not initialised (persistence unavailable), it returns an
+// empty TrendsLoadedMsg so the tab renders its "not enough data" empty state.
+func (a App) loadTrendsCmd() tea.Cmd {
+	store := a.trendsPersistenceStore()
+	return func() tea.Msg {
+		if store == nil {
+			return TrendsLoadedMsg{Buckets: nil}
+		}
+		to := trends.RoundedNow()
+		from := to.Add(-time.Duration(trends.DefaultLookbackDays) * 24 * time.Hour)
+		sessions, err := store.LoadRange(from, to)
+		if err != nil {
+			return TrendsLoadedMsg{Buckets: nil}
+		}
+		buckets := trends.Aggregate(sessions, from, to, trends.DefaultBucketDuration)
+		return TrendsLoadedMsg{Buckets: buckets}
+	}
+}
+
+// trendsPersistenceStore returns the underlying *signalstore.Store if persistence
+// is configured, or nil otherwise. This is the single access point so tests can
+// override the App struct and get nil-safe behaviour.
+func (a App) trendsPersistenceStore() *signalstore.Store {
+	if a.trendsPersistence == nil {
+		return nil
+	}
+	return a.trendsPersistence.store
+}
+
 // tabHints returns the context-sensitive hint string for the active tab.
 func (a App) tabHints() string {
 	switch a.activeTab {
@@ -414,6 +535,8 @@ func (a App) tabHints() string {
 		return "↑↓:scroll  pgup/pgdn:page"
 	case TabControl:
 		return "r:refresh  e:edit policy  c:clear denials"
+	case TabTrends:
+		return "sparkline:signal counts  lookback:30d"
 	}
 	return ""
 }
@@ -430,6 +553,7 @@ func renderTabBar(active Tab, width int) string {
 		{"3", TabCost},
 		{"4", TabHooks},
 		{"5", TabDAG},
+		{"6", TabTrends},
 		{"^G", TabControl},
 	}
 

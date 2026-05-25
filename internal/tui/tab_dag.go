@@ -51,8 +51,9 @@ type DAGTab struct {
 	mode dagViewMode
 
 	// trace-list state
-	traces      []traceEntry
-	traceCursor int
+	traces       []traceEntry
+	traceCursor  int
+	traceOffset  int // scroll offset: index of first visible row
 
 	// graph state (only meaningful when mode >= dagViewGraph)
 	activeTrace string
@@ -65,6 +66,14 @@ type DAGTab struct {
 	// the UI thread for hundreds of ms.
 	graphCache    string
 	graphCacheKey string
+
+	// in-graph search state (mode=dagViewGraph)
+	dagSearchInputting bool   // true while user is typing the search query
+	dagSearchActive    bool   // true when a confirmed query is being applied
+	dagSearchQuery     string // confirmed query (after Enter)
+	dagSearchBuf       string // characters typed so far (before Enter)
+	dagSearchMatches   []int  // flatNodes indices that match the query
+	dagSearchIdx       int    // current position in dagSearchMatches (n/N nav)
 
 	// flash message — shown briefly at the bottom (e.g. "yanked!")
 	flash      string
@@ -83,16 +92,24 @@ type traceEntry struct {
 // NewDAGTab returns an initialised DAGTab.
 func NewDAGTab() *DAGTab { return &DAGTab{} }
 
+// Spans returns the current accumulated span slice.
+// This getter is required by AdvisorPipeline (ι-2) to read spans without
+// reaching into DAGTab internals from app.go.
+func (d *DAGTab) Spans() []telemetry.Span { return d.spans }
+
 func (d *DAGTab) Init() tea.Cmd { return nil }
 
 func (d *DAGTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case SpanCollectedMsg:
 		d.spans = append(d.spans, msg.Span)
+		d.spans = capSpans(d.spans, resolveSpanCap())
 		d.rebuildTraces()
 		return d, nil
 	case SpanBatchMsg:
 		d.spans = append(d.spans, msg.Spans...)
+		// Cap AFTER appending so a single huge batch still respects the limit.
+		d.spans = capSpans(d.spans, resolveSpanCap())
 		d.rebuildTraces()
 		return d, nil
 	case tea.KeyMsg:
@@ -118,10 +135,12 @@ func (d *DAGTab) handleKeyTraces(msg tea.KeyMsg) (TabModel, tea.Cmd) {
 	case "j", "down":
 		if len(d.traces) > 0 && d.traceCursor < len(d.traces)-1 {
 			d.traceCursor++
+			d.clampTraceOffset()
 		}
 	case "k", "up":
 		if d.traceCursor > 0 {
 			d.traceCursor--
+			d.clampTraceOffset()
 		}
 	case "enter", "l", "right":
 		if len(d.traces) > 0 {
@@ -132,15 +151,68 @@ func (d *DAGTab) handleKeyTraces(msg tea.KeyMsg) (TabModel, tea.Cmd) {
 		}
 	case "g":
 		d.traceCursor = 0
+		d.clampTraceOffset()
 	case "G":
 		if len(d.traces) > 0 {
 			d.traceCursor = len(d.traces) - 1
+			d.clampTraceOffset()
 		}
 	}
 	return d, nil
 }
 
+// clampTraceOffset adjusts traceOffset so traceCursor stays within the
+// visible window. Window height is derived from d.height minus fixed
+// header/footer reservations (2 header lines + 2 footer lines = 4).
+func (d *DAGTab) clampTraceOffset() {
+	visibleRows := d.height - 4
+	if visibleRows < 1 {
+		visibleRows = 1
+	}
+	// Scroll down: cursor past bottom of window.
+	if d.traceCursor >= d.traceOffset+visibleRows {
+		d.traceOffset = d.traceCursor - visibleRows + 1
+	}
+	// Scroll up: cursor above top of window.
+	if d.traceCursor < d.traceOffset {
+		d.traceOffset = d.traceCursor
+	}
+}
+
 func (d *DAGTab) handleKeyGraph(msg tea.KeyMsg) (TabModel, tea.Cmd) {
+	// ── In-graph search input mode ──────────────────────────────────────────
+	if d.dagSearchInputting {
+		switch {
+		case msg.Type == tea.KeyEscape:
+			// Cancel search without changing query.
+			d.dagSearchInputting = false
+			d.dagSearchBuf = ""
+		case msg.Type == tea.KeyEnter:
+			// Confirm query.
+			d.dagSearchInputting = false
+			d.dagSearchQuery = d.dagSearchBuf
+			d.dagSearchBuf = ""
+			d.dagSearchActive = d.dagSearchQuery != ""
+			d.rebuildSearchMatches()
+			d.dagSearchIdx = 0
+			// Jump cursor to first match.
+			if len(d.dagSearchMatches) > 0 {
+				d.nodeCursor = d.dagSearchMatches[0]
+			}
+			// Invalidate render cache so highlights appear.
+			d.graphCache = ""
+			d.graphCacheKey = ""
+		case msg.Type == tea.KeyBackspace || msg.Type == tea.KeyDelete:
+			if len(d.dagSearchBuf) > 0 {
+				r := []rune(d.dagSearchBuf)
+				d.dagSearchBuf = string(r[:len(r)-1])
+			}
+		default:
+			d.dagSearchBuf += msg.String()
+		}
+		return d, nil
+	}
+
 	switch s := msg.String(); s {
 	case "j", "down":
 		if d.nodeCursor < len(d.flatNodes)-1 {
@@ -155,7 +227,36 @@ func (d *DAGTab) handleKeyGraph(msg tea.KeyMsg) (TabModel, tea.Cmd) {
 			d.mode = dagViewSpan
 		}
 	case "esc", "h", "left":
-		d.mode = dagViewTraces
+		// If a search is active, clear it first. Second Esc goes back to traces.
+		if d.dagSearchActive {
+			d.dagSearchActive = false
+			d.dagSearchQuery = ""
+			d.dagSearchMatches = nil
+			d.graphCache = ""
+			d.graphCacheKey = ""
+		} else {
+			d.mode = dagViewTraces
+		}
+	case "/":
+		// Enter search input mode.
+		d.dagSearchInputting = true
+		d.dagSearchBuf = d.dagSearchQuery // pre-fill with last query
+	case "n":
+		// Next match.
+		if len(d.dagSearchMatches) > 0 {
+			d.dagSearchIdx = (d.dagSearchIdx + 1) % len(d.dagSearchMatches)
+			d.nodeCursor = d.dagSearchMatches[d.dagSearchIdx]
+			d.graphCache = ""
+			d.graphCacheKey = ""
+		}
+	case "N":
+		// Previous match.
+		if len(d.dagSearchMatches) > 0 {
+			d.dagSearchIdx = (d.dagSearchIdx - 1 + len(d.dagSearchMatches)) % len(d.dagSearchMatches)
+			d.nodeCursor = d.dagSearchMatches[d.dagSearchIdx]
+			d.graphCache = ""
+			d.graphCacheKey = ""
+		}
 	case "y":
 		if len(d.flatNodes) > 0 {
 			return d, d.yankCmd(d.flatNodes[d.nodeCursor].Span)
@@ -171,6 +272,17 @@ func (d *DAGTab) handleKeyGraph(msg tea.KeyMsg) (TabModel, tea.Cmd) {
 		d.graphCacheKey = ""
 	}
 	return d, nil
+}
+
+// rebuildSearchMatches populates d.dagSearchMatches with the flatNodes
+// indices that match the current dagSearchQuery.
+func (d *DAGTab) rebuildSearchMatches() {
+	d.dagSearchMatches = nil
+	for i, n := range d.flatNodes {
+		if MatchNode(n, d.dagSearchQuery) {
+			d.dagSearchMatches = append(d.dagSearchMatches, i)
+		}
+	}
 }
 
 func (d *DAGTab) handleKeySpan(msg tea.KeyMsg) (TabModel, tea.Cmd) {
@@ -204,9 +316,14 @@ func (d *DAGTab) SetSize(width, height int) TabModel {
 
 // rebuildTraces aggregates per-trace metadata from the current span slice.
 // Cheap O(N) walk; called after each batch arrives.
+// Spans with an empty TraceID or SpanID are skipped — they cannot be grouped
+// into a meaningful trace and would produce blank rows in the trace list.
 func (d *DAGTab) rebuildTraces() {
 	idx := make(map[string]*traceEntry)
 	for _, s := range d.spans {
+		if s.TraceID == "" || s.SpanID == "" {
+			continue // reject zero-value / malformed spans (α-3 safety gate)
+		}
 		t, ok := idx[s.TraceID]
 		if !ok {
 			t = &traceEntry{TraceID: s.TraceID, System: s.System, Status: "done"}
@@ -351,9 +468,8 @@ func (d *DAGTab) View() string {
 		return ""
 	}
 	if len(d.spans) == 0 {
-		return RenderEmptyState(
-			"No telemetry spans collected yet. Launch a Claude Code session or wait for backfill.",
-			d.width, d.height)
+		content := RenderProviderEmptyState()
+		return RenderPanel("Agent DAG · waiting for spans", content, d.width, max(3, d.height), true)
 	}
 
 	switch d.mode {
@@ -374,25 +490,36 @@ func (d *DAGTab) renderTracesView() string {
 	dimStyle := lipgloss.NewStyle().Foreground(colorDim)
 
 	var sb strings.Builder
-	sb.WriteString(headerStyle.Render(fmt.Sprintf("%-4s %-8s %-30s %-15s %-7s %-7s %s",
-		"#", "STATUS", "TRACE", "SYSTEM", "SPANS", "DEPTH", "LAST")))
+	// Column layout (80-col safe):
+	// #(4) STATUS(9) PRV(4) TRACE(24) SPANS(7) DEPTH(7) LAST(8)  ≈ 63 + cursor(2)
+	sb.WriteString(headerStyle.Render(fmt.Sprintf("%-4s %-9s %-3s %-24s %-7s %-7s %s",
+		"#", "STATUS", "PRV", "TRACE", "SPANS", "DEPTH", "LAST")))
 	sb.WriteString("\n")
 	sb.WriteString(dimStyle.Render(strings.Repeat("─", min(d.width, 90))))
 	sb.WriteString("\n")
 
-	const maxRows = 30
-	end := len(d.traces)
-	if end > maxRows {
-		end = maxRows
+	// Visible window: derive height from panel dimensions.
+	// Header = 2 lines (column header + separator), footer = 2 lines
+	// (help + flash / blank line) → reserve 4 lines total.
+	visibleRows := d.height - 4
+	if visibleRows < 1 {
+		visibleRows = 1
 	}
-	for i := 0; i < end; i++ {
+	winEnd := d.traceOffset + visibleRows
+	if winEnd > len(d.traces) {
+		winEnd = len(d.traces)
+	}
+	for i := d.traceOffset; i < winEnd; i++ {
 		t := d.traces[i]
 		cursor := "  "
-		row := fmt.Sprintf("%-4d %-8s %-30s %-15s %-7d %-7d %s",
+		// ProviderBadge is styled; render the plain-text columns separately
+		// so the overall row can still be highlighted by cursorStyle.
+		badge := ProviderBadge(t.System)
+		row := fmt.Sprintf("%-4d %-9s %s %-24s %-7d %-7d %s",
 			i+1,
 			statusIcon(t.Status),
+			badge,
 			shortID(t.TraceID),
-			truncate(t.System, 15),
 			t.SpanCount,
 			t.MaxDepth,
 			t.LastSeen.Local().Format("15:04:05"),
@@ -403,14 +530,16 @@ func (d *DAGTab) renderTracesView() string {
 		}
 		sb.WriteString(cursor + row + "\n")
 	}
-	if len(d.traces) > maxRows {
-		sb.WriteString(dimStyle.Render(fmt.Sprintf("  … %d more\n", len(d.traces)-maxRows)))
+	if winEnd < len(d.traces) {
+		sb.WriteString(dimStyle.Render(fmt.Sprintf("  … %d more\n", len(d.traces)-winEnd)))
 	}
 	sb.WriteString("\n")
 	sb.WriteString(d.renderHelp([]helpKey{
 		{"j/k", "navigate"}, {"enter/l", "open graph"}, {"g/G", "top/bottom"},
 	}))
 	sb.WriteString(d.renderFlash())
+	// TODO(span-cap): surface "(cap active)" in the title when len(d.spans) == resolveSpanCap().
+	// Deferred because adding the conditional string costs ~10 LOC of layout arithmetic.
 	return RenderPanel(fmt.Sprintf("Agent DAG · %d traces · %d spans", len(d.traces), len(d.spans)),
 		sb.String(), d.width, max(3, d.height), true)
 }
@@ -440,12 +569,12 @@ func (d *DAGTab) renderGraphView() string {
 
 	graph := d.renderGraph(contentBudget)
 
-	help := d.renderHelp([]helpKey{
-		{"j/k", "select"}, {"enter/l", "detail"}, {"y", "yank"},
-		{"e", "edit"}, {"r", "redraw"}, {"esc/h", "back"},
-	})
+	searchKeys := []helpKey{{"j/k", "select"}, {"enter/l", "detail"}, {"y", "yank"},
+		{"e", "edit"}, {"/", "search"}, {"n/N", "next/prev"}, {"r", "redraw"}, {"esc/h", "back"}}
+	help := d.renderHelp(searchKeys)
 
-	body := header + "\n\n" + graph + "\n\n" + help + d.renderFlash()
+	searchBar := d.renderDAGSearchBar(contentBudget)
+	body := header + "\n\n" + graph + "\n\n" + help + searchBar + d.renderFlash()
 
 	return RenderPanel(
 		fmt.Sprintf("Trace %s · %d nodes", shortID(d.activeTrace), len(d.flatNodes)),
@@ -528,9 +657,9 @@ func (d *DAGTab) renderGraph(width int) string {
 		return ""
 	}
 
-	// Cache hit: same trace, same cursor, same width → reuse last render.
-	cacheKey := fmt.Sprintf("%s|n=%d|c=%d|w=%d",
-		d.activeTrace, len(d.flatNodes), d.nodeCursor, width)
+	// Cache hit: same trace, same cursor, same width, same search state → reuse last render.
+	cacheKey := fmt.Sprintf("%s|n=%d|c=%d|w=%d|q=%s",
+		d.activeTrace, len(d.flatNodes), d.nodeCursor, width, d.dagSearchQuery)
 	if d.graphCache != "" && d.graphCacheKey == cacheKey {
 		return d.graphCache
 	}
@@ -711,25 +840,26 @@ func (d *DAGTab) renderGraph(width int) string {
 	// readable graph + a cursor arrow on the selected row.
 	cursorStyle := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
 	dimStyle := lipgloss.NewStyle().Foreground(colorDim)
-	errStyle := lipgloss.NewStyle().Foreground(colorError)
-	runStyle := lipgloss.NewStyle().Foreground(colorWarning)
-	doneStyle := lipgloss.NewStyle().Foreground(colorSuccess)
+	searchMatchStyle := lipgloss.NewStyle().Foreground(colorStatusError).Bold(true)
 
 	// Which lines belong to which node's box? For each node, three lines.
-	type rowColor struct{ start, end int; style lipgloss.Style }
+	// StatusColor is the SSoT — no inline switch here.
+	type rowColor struct {
+		start, end int
+		style      lipgloss.Style
+		isMatch    bool // true when dagSearchActive and node matches query
+	}
 	colorRanges := []rowColor{}
 	for _, p := range positions {
 		y := p.row * pitchY
-		var style lipgloss.Style
-		switch p.node.Span.Status {
-		case "error":
-			style = errStyle
-		case "running":
-			style = runStyle
-		default:
-			style = doneStyle
+		style := lipgloss.NewStyle().Foreground(StatusColor(p.node.Span))
+		// Also factor in duration: a "done" span that was very slow gets red.
+		if p.node.Span.Status != "error" && !p.node.Span.EndTime.IsZero() {
+			durMs := p.node.Span.Duration().Milliseconds()
+			style = lipgloss.NewStyle().Foreground(DurationColor(durMs))
 		}
-		colorRanges = append(colorRanges, rowColor{start: y, end: y + nodeH, style: style})
+		isMatch := d.dagSearchActive && MatchNode(p.node, d.dagSearchQuery)
+		colorRanges = append(colorRanges, rowColor{start: y, end: y + nodeH, style: style, isMatch: isMatch})
 	}
 
 	// Show a window header so the user knows what's visible.
@@ -753,10 +883,21 @@ func (d *DAGTab) renderGraph(width int) string {
 			}
 		}
 
+		// Check if this row belongs to a search-matching node.
+		matchRow := false
+		for _, cr := range colorRanges {
+			if y >= cr.start && y < cr.end && cr.isMatch {
+				matchRow = true
+				break
+			}
+		}
+
 		line := string(row)
 		// Style: cursor arrow prefix on selected node's middle line.
 		if selectedRow {
 			line = cursorStyle.Render(line)
+		} else if matchRow {
+			line = searchMatchStyle.Render(line)
 		} else {
 			// Pick the style based on which node (if any) this row belongs to.
 			var styled bool
@@ -774,6 +915,7 @@ func (d *DAGTab) renderGraph(width int) string {
 		}
 
 		// Cursor marker for the selected node's middle row.
+		// Search match marker: "*" prefix on match node's middle row.
 		if selectedRow {
 			localCursor := d.nodeCursor - winStart
 			if localCursor >= 0 && localCursor < len(positions) {
@@ -786,6 +928,19 @@ func (d *DAGTab) renderGraph(width int) string {
 				}
 			} else {
 				line = "  " + line
+			}
+		} else if matchRow {
+			// Identify the middle row of each matching node for the * marker.
+			for _, cr := range colorRanges {
+				if y >= cr.start && y < cr.end && cr.isMatch {
+					midY := cr.start + nodeH/2
+					if y == midY {
+						line = searchMatchStyle.Render("* ") + line
+					} else {
+						line = "  " + line
+					}
+					break
+				}
 			}
 		} else {
 			line = "  " + line
@@ -1100,6 +1255,27 @@ func (d *DAGTab) renderHelp(keys []helpKey) string {
 	return strings.Join(parts, "  ")
 }
 
+// renderDAGSearchBar renders the "/" search prompt + active query info
+// at the bottom of the graph view.
+func (d *DAGTab) renderDAGSearchBar(width int) string {
+	if d.dagSearchInputting {
+		prompt := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).Render("/")
+		cursor := lipgloss.NewStyle().Foreground(colorPrimary).Render("█")
+		return "\n" + prompt + d.dagSearchBuf + cursor
+	}
+	if d.dagSearchActive && d.dagSearchQuery != "" {
+		matchInfo := ""
+		if len(d.dagSearchMatches) > 0 {
+			matchInfo = fmt.Sprintf("  %d/%d matches", d.dagSearchIdx+1, len(d.dagSearchMatches))
+		} else {
+			matchInfo = "  (no matches)"
+		}
+		style := lipgloss.NewStyle().Foreground(colorStatusInfo)
+		return "\n" + style.Render(fmt.Sprintf("search: %q%s  (n/N navigate, Esc clear)", d.dagSearchQuery, matchInfo))
+	}
+	return ""
+}
+
 func (d *DAGTab) renderFlash() string {
 	if d.flash == "" || time.Now().After(d.flashUntil) {
 		return ""
@@ -1108,14 +1284,17 @@ func (d *DAGTab) renderFlash() string {
 	return "\n" + style.Render(d.flash)
 }
 
+// statusIcon renders a status string with the canonical SSoT color from colors.go.
 func statusIcon(status string) string {
+	s := telemetry.Span{Status: status}
+	c := StatusColor(s)
 	switch status {
 	case "running":
-		return lipgloss.NewStyle().Foreground(colorWarning).Render("▶ running")
+		return lipgloss.NewStyle().Foreground(c).Render("▶ running")
 	case "error":
-		return lipgloss.NewStyle().Foreground(colorError).Render("✗ error")
+		return lipgloss.NewStyle().Foreground(c).Render("✗ error")
 	default:
-		return lipgloss.NewStyle().Foreground(colorSuccess).Render("✓ done")
+		return lipgloss.NewStyle().Foreground(c).Render("✓ done")
 	}
 }
 

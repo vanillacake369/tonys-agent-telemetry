@@ -73,8 +73,9 @@ func TestApp_TabSwitchingRoundTrip(t *testing.T) {
 
 func TestApp_TabCyclingWithTabKey(t *testing.T) {
 	a := NewApp()
-	// Sessions → Skills → Cost → Hooks → DAG → Control → wrap → Sessions.
-	expected := []Tab{TabSkills, TabCost, TabHooks, TabDAG, TabControl, TabSessions}
+	// Tab key cycles through tabOrder forward, wrapping back to Sessions.
+	// Sessions → Skills → Cost → Hooks → DAG → Control → Trends → Sessions.
+	expected := []Tab{TabSkills, TabCost, TabHooks, TabDAG, TabControl, TabTrends, TabSessions}
 	for i, want := range expected {
 		a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyTab})
 		if a.activeTab != want {
@@ -85,13 +86,32 @@ func TestApp_TabCyclingWithTabKey(t *testing.T) {
 
 func TestApp_TabCyclingWithShiftTabKey(t *testing.T) {
 	a := NewApp()
-	// Sessions ← Control ← DAG ← Hooks ← Cost ← Skills ← Sessions.
-	expected := []Tab{TabControl, TabDAG, TabHooks, TabCost, TabSkills, TabSessions}
+	// Shift+Tab cycles through tabOrder backward, wrapping forward to Sessions.
+	// Sessions ← Trends ← Control ← DAG ← Hooks ← Cost ← Skills ← Sessions.
+	expected := []Tab{TabTrends, TabControl, TabDAG, TabHooks, TabCost, TabSkills, TabSessions}
 	for i, want := range expected {
 		a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyShiftTab})
 		if a.activeTab != want {
 			t.Errorf("step %d: activeTab = %d, want %d", i+1, a.activeTab, want)
 		}
+	}
+}
+
+// TestApp_TabCyclingCoversAllTabs asserts that pressing Tab len(tabOrder)
+// times visits every tab exactly once and returns to the starting tab.
+// Regression guard for QA finding V-1 (tab cycling silently skipping new tabs).
+func TestApp_TabCyclingCoversAllTabs(t *testing.T) {
+	a := NewApp()
+	seen := map[Tab]bool{a.activeTab: true}
+	for i := 0; i < len(tabOrder); i++ {
+		a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyTab})
+		seen[a.activeTab] = true
+	}
+	if len(seen) != len(tabOrder) {
+		t.Errorf("Tab cycling covered %d distinct tabs, want %d (one per tabOrder entry)", len(seen), len(tabOrder))
+	}
+	if a.activeTab != TabSessions {
+		t.Errorf("after %d Tab presses, activeTab = %d, want TabSessions (%d)", len(tabOrder), a.activeTab, TabSessions)
 	}
 }
 

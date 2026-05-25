@@ -11,7 +11,9 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/catalog"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/platform"
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/recommender"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/skill"
 )
 
@@ -52,6 +54,15 @@ type skillsGitHubDebounceMsg struct {
 	sortBy skill.SortBy
 }
 
+// CatalogLoadedMsg is sent when a catalog fetch (from cache or network) completes.
+// FetchedAt records the time the catalog data was last fetched from upstream;
+// it is used to determine staleness relative to catalog.DefaultTTL.
+type CatalogLoadedMsg struct {
+	Items     []catalog.Item
+	FetchedAt time.Time
+	Err       error
+}
+
 // SkillsTab implements TabModel for the Skills tab.
 type SkillsTab struct {
 	fetcher       *skill.Fetcher
@@ -74,6 +85,14 @@ type SkillsTab struct {
 	previewCancelFn context.CancelFunc
 	keys            KeyMap
 	wizard          AnalyzeWizard
+
+	// catalog pane state
+	catalogItems     []catalog.Item // nil = loading state
+	catalogFetchedAt time.Time      // zero = not yet fetched
+	catalogErr       error
+
+	// Advisor pane state — populated by RecommendationsReadyMsg routed from App.
+	recommendations []recommender.Recommendation
 }
 
 // NewSkillsTab creates an initialised SkillsTab.
@@ -92,11 +111,54 @@ func NewSkillsTab() SkillsTab {
 	}
 }
 
-// Init scans local skills asynchronously.
+// Init scans local skills asynchronously and triggers a catalog load.
 func (t SkillsTab) Init() tea.Cmd {
+	return tea.Batch(
+		func() tea.Msg {
+			skills, err := skill.ScanLocal()
+			return LocalSkillsLoadedMsg{Skills: skills, Err: err}
+		},
+		catalogLoadCmd(),
+	)
+}
+
+// catalogLoadCmd returns a tea.Cmd that reads the catalog from cache first,
+// then triggers an HTTP fetch in the background if the cache is stale.
+// DRY: the Skills tab and any future caller both use this path — no inline HTTP.
+func catalogLoadCmd() tea.Cmd {
 	return func() tea.Msg {
-		skills, err := skill.ScanLocal()
-		return LocalSkillsLoadedMsg{Skills: skills, Err: err}
+		c := &catalog.Cache{Path: catalog.ResolveCachePath()}
+
+		// Try cache first.
+		items, mtime, err := c.Read()
+		if err == nil {
+			// Cache hit: return cached items; initiate background refresh if stale.
+			if c.IsStale(catalog.DefaultTTL) {
+				// Stale but still usable: return cached data immediately,
+				// then trigger a background fetch via a second command.
+				// For simplicity in this pass, we return the stale data and
+				// mark FetchedAt as the cache mtime. The "(stale)" prefix in
+				// View handles the user-visible indicator.
+				return CatalogLoadedMsg{Items: items, FetchedAt: mtime}
+			}
+			return CatalogLoadedMsg{Items: items, FetchedAt: mtime}
+		}
+
+		// Cache miss: try network fetch.
+		// Belt-and-suspenders: even though HTTPFetcher sets a client-level
+		// timeout, also bound the context so a stuck dial cannot hang
+		// "Loading catalog…" indefinitely (QA finding R-2).
+		f := catalog.NewHTTPFetcher()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		fetched, fetchErr := f.Fetch(ctx)
+		if fetchErr != nil {
+			return CatalogLoadedMsg{Err: fetchErr, FetchedAt: time.Now()}
+		}
+
+		// Persist to cache (best-effort; ignore write errors).
+		_ = c.Write(fetched)
+		return CatalogLoadedMsg{Items: fetched, FetchedAt: time.Now()}
 	}
 }
 
@@ -158,6 +220,19 @@ func (t SkillsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 		} else {
 			t.preview = ""
 		}
+		return t, nil
+
+	case CatalogLoadedMsg:
+		t.catalogErr = msg.Err
+		if msg.Err == nil {
+			t.catalogItems = msg.Items
+		}
+		t.catalogFetchedAt = msg.FetchedAt
+		return t, nil
+
+	case RecommendationsReadyMsg:
+		// Replace (not append) — each pipeline run supersedes the previous result.
+		t.recommendations = msg.Recommendations
 		return t, nil
 
 	case skillsDebounceMsg:
@@ -508,6 +583,9 @@ func (t SkillsTab) SetSize(width, height int) TabModel {
 	return t
 }
 
+// catalogMaxItems is the maximum number of catalog entries shown in the list view.
+const catalogMaxItems = 20
+
 // View renders the skills tab.
 func (t SkillsTab) View() string {
 	if t.width == 0 || t.height == 0 {
@@ -546,7 +624,125 @@ func (t SkillsTab) View() string {
 		)
 	}
 
-	return splitView
+	catalogSection := t.renderCatalogSection(t.width)
+	advisorSection := renderAdvisorSection(t.recommendations, t.width)
+	return splitView + "\n" + catalogSection + "\n" + advisorSection
+}
+
+// CatalogItems returns the currently loaded catalog items.
+// This getter is required by AdvisorPipeline (ι-2) to pass the catalog to
+// MaybeRun without reaching into SkillsTab internals from app.go.
+func (t SkillsTab) CatalogItems() []catalog.Item {
+	return t.catalogItems
+}
+
+// LocalSkillNames returns the name of each locally-installed skill.
+// This is the SSoT read point for InstalledSkills: app.go reads it here
+// once (in the SpanBatchMsg routing) and passes it to AdvisorPipeline.MaybeRun.
+// DRY: do not read localSkills anywhere else from app.go.
+func (t SkillsTab) LocalSkillNames() []string {
+	if len(t.localSkills) == 0 {
+		return nil
+	}
+	names := make([]string, len(t.localSkills))
+	for i, s := range t.localSkills {
+		names[i] = s.Name
+	}
+	return names
+}
+
+// renderCatalogSection renders the best-practice catalog pane below the skills list.
+// The section always ends with catalog.Attribution to satisfy the GA gate requirement.
+func (t SkillsTab) renderCatalogSection(width int) string {
+	sep := lipgloss.NewStyle().Foreground(colorDim).Render(strings.Repeat("─", min(width, 80)))
+	attributionLine := lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render(catalog.Attribution)
+
+	var body string
+
+	// Loading state: catalogItems == nil means no message received yet.
+	if t.catalogItems == nil && t.catalogErr == nil {
+		body = lipgloss.NewStyle().Foreground(colorDim).Italic(true).Render("Loading catalog...")
+		return strings.Join([]string{sep, body, attributionLine}, "\n")
+	}
+
+	// Error state.
+	if t.catalogErr != nil {
+		body = lipgloss.NewStyle().Foreground(colorDim).Italic(true).
+			Render("Catalog unavailable: " + t.catalogErr.Error())
+		return strings.Join([]string{sep, body, attributionLine}, "\n")
+	}
+
+	n := len(t.catalogItems)
+	minViable := catalog.ResolveMinViable("")
+
+	// Below-minimum warning: show partial warning, no item list.
+	if n < minViable {
+		warning := lipgloss.NewStyle().Foreground(colorDim).
+			Render(fmt.Sprintf("Catalog partial (%d/%d) — refresh required", n, minViable))
+		return strings.Join([]string{sep, warning, attributionLine}, "\n")
+	}
+
+	// Title row with staleness indicator.
+	age := time.Since(t.catalogFetchedAt)
+	stale := age >= catalog.DefaultTTL
+	ageStr := formatAge(age)
+
+	titleText := fmt.Sprintf("Best-practice catalog (%d items, fetched %s ago)", n, ageStr)
+	if stale {
+		titleText = "(stale) " + titleText
+	}
+	titleLine := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).Render(titleText)
+
+	// Item list: up to catalogMaxItems entries.
+	var rows []string
+	limit := n
+	if limit > catalogMaxItems {
+		limit = catalogMaxItems
+	}
+	for _, item := range t.catalogItems[:limit] {
+		icon := catalogTypeIcon(item.Type)
+		tagsStr := strings.Join(item.Tags, ", ")
+		line := fmt.Sprintf("[%s] %s", icon, item.Title)
+		if tagsStr != "" {
+			line += fmt.Sprintf("  tags: %s", tagsStr)
+		}
+		rows = append(rows, lipgloss.NewStyle().Foreground(colorText).Render(line))
+	}
+
+	parts := []string{sep, titleLine}
+	parts = append(parts, rows...)
+	parts = append(parts, attributionLine)
+	return strings.Join(parts, "\n")
+}
+
+// catalogTypeIcon returns a short text icon for a catalog ItemType.
+func catalogTypeIcon(t catalog.ItemType) string {
+	switch t {
+	case catalog.ItemTypeSkill:
+		return "skill"
+	case catalog.ItemTypeTemplate:
+		return "tmpl"
+	case catalog.ItemTypeAgent:
+		return "agent"
+	case catalog.ItemTypeHook:
+		return "hook"
+	default:
+		return "?"
+	}
+}
+
+// formatAge formats a duration as a human-readable age string.
+func formatAge(d time.Duration) string {
+	if d < time.Minute {
+		return "just now"
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours()/24))
 }
 
 // renderSkillListWithSearch renders a search input (with sort label) followed by the skill list.
