@@ -25,6 +25,7 @@ const (
 	TabSessions Tab = iota
 	TabSkills
 	TabCost
+	TabHooks
 	TabControl
 )
 
@@ -33,11 +34,12 @@ var tabNames = map[Tab]string{
 	TabSessions: "Sessions",
 	TabSkills:   "Skills",
 	TabCost:     "Cost",
+	TabHooks:    "Hooks",
 	TabControl:  "Control",
 }
 
 // tabOrder defines the left-to-right display order of tabs.
-var tabOrder = []Tab{TabSessions, TabSkills, TabCost, TabControl}
+var tabOrder = []Tab{TabSessions, TabSkills, TabCost, TabHooks, TabControl}
 
 // TabModel is the interface that every tab sub-model must implement.
 // SetSize returns the updated model (value-receiver implementations must
@@ -85,6 +87,7 @@ func NewApp() App {
 		TabSessions: NewSessionsTab(),
 		TabSkills:   NewSkillsTab(),
 		TabCost:     NewCostTab(),
+		TabHooks:    NewHooksTab(),
 		TabControl:  NewControlTab(),
 	}
 	return App{
@@ -214,11 +217,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Tab / Shift+Tab cycle tabs regardless of search focus.
 		if key.Matches(msg, a.keys.NextTab) {
-			a.activeTab = (a.activeTab + 1) % 4
+			a.activeTab = (a.activeTab + 1) % 5
 			return a, nil
 		}
 		if key.Matches(msg, a.keys.PrevTab) {
-			a.activeTab = (a.activeTab + 3) % 4
+			a.activeTab = (a.activeTab + 4) % 5
 			return a, nil
 		}
 
@@ -253,6 +256,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		case key.Matches(msg, a.keys.Tab3):
 			a.activeTab = TabCost
+			return a, nil
+		case key.Matches(msg, a.keys.Tab4):
+			a.activeTab = TabHooks
 			return a, nil
 		case key.Matches(msg, a.keys.TabControl):
 			a.activeTab = TabControl
@@ -369,6 +375,8 @@ func (a App) tabHints() string {
 		return "↵:analyze  o:open  s:sort  y:copy  r:refresh"
 	case TabCost:
 		return "r:refresh"
+	case TabHooks:
+		return "r:refresh"
 	case TabControl:
 		return "r:refresh  e:edit policy  c:clear denials"
 	}
@@ -376,7 +384,7 @@ func (a App) tabHints() string {
 }
 
 // renderTabBar returns the tab bar string for the given active tab and total width.
-// Uses k9s/btop-style numbered tabs: "1:Sessions │ 2:Skills │ 3:Cost │ ^G:Control"
+// Uses k9s/btop-style numbered tabs: "1:Sessions │ 2:Skills │ 3:Cost │ 4:Hooks │ ^G:Control"
 func renderTabBar(active Tab, width int) string {
 	tabDefs := []struct {
 		num string
@@ -385,6 +393,7 @@ func renderTabBar(active Tab, width int) string {
 		{"1", TabSessions},
 		{"2", TabSkills},
 		{"3", TabCost},
+		{"4", TabHooks},
 		{"^G", TabControl},
 	}
 

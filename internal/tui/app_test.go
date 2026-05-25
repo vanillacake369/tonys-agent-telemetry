@@ -83,8 +83,12 @@ func TestApp_TabCyclingWithTabKey(t *testing.T) {
 		t.Errorf("Tab from Skills: activeTab = %d, want %d (TabCost)", a.activeTab, TabCost)
 	}
 	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyTab})
+	if a.activeTab != TabHooks {
+		t.Errorf("Tab from Cost: activeTab = %d, want %d (TabHooks)", a.activeTab, TabHooks)
+	}
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyTab})
 	if a.activeTab != TabControl {
-		t.Errorf("Tab from Skills: activeTab = %d, want %d (TabControl)", a.activeTab, TabControl)
+		t.Errorf("Tab from Hooks: activeTab = %d, want %d (TabControl)", a.activeTab, TabControl)
 	}
 	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyTab})
 	if a.activeTab != TabSessions {
@@ -100,8 +104,12 @@ func TestApp_TabCyclingWithShiftTabKey(t *testing.T) {
 		t.Errorf("Shift+Tab from Sessions: activeTab = %d, want %d (TabControl)", a.activeTab, TabControl)
 	}
 	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if a.activeTab != TabHooks {
+		t.Errorf("Shift+Tab from Control: activeTab = %d, want %d (TabHooks)", a.activeTab, TabHooks)
+	}
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyShiftTab})
 	if a.activeTab != TabCost {
-		t.Errorf("Shift+Tab from Control: activeTab = %d, want %d (TabCost)", a.activeTab, TabCost)
+		t.Errorf("Shift+Tab from Hooks: activeTab = %d, want %d (TabCost)", a.activeTab, TabCost)
 	}
 	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyShiftTab})
 	if a.activeTab != TabSkills {
@@ -201,7 +209,7 @@ func TestApp_ViewContainsTabNames(t *testing.T) {
 	a := NewApp()
 	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 120, Height: 24})
 	view := a.View()
-	for _, name := range []string{"Sessions", "Skills", "Cost", "Control"} {
+	for _, name := range []string{"Sessions", "Skills", "Cost", "Hooks", "Control"} {
 		if !strings.Contains(view, name) {
 			t.Errorf("View() missing tab name %q", name)
 		}
@@ -212,7 +220,7 @@ func TestApp_ViewContainsNumberedTabPrefixes(t *testing.T) {
 	a := NewApp()
 	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 120, Height: 24})
 	view := a.View()
-	for _, prefix := range []string{"1:Sessions", "2:Skills", "3:Cost", "^G:Control"} {
+	for _, prefix := range []string{"1:Sessions", "2:Skills", "3:Cost", "4:Hooks", "^G:Control"} {
 		if !strings.Contains(view, prefix) {
 			t.Errorf("View() missing numbered tab prefix %q", prefix)
 		}

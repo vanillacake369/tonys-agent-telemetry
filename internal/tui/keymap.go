@@ -8,6 +8,7 @@ type KeyMap struct {
 	Tab1       key.Binding // "1" → Sessions
 	Tab2       key.Binding // "2" → Skills
 	Tab3       key.Binding // "3" → Cost
+	Tab4       key.Binding // "4" → Hooks
 	TabControl key.Binding // "ctrl+g" → Control (Governance)
 	NextTab    key.Binding // "tab" → cycle forward
 	PrevTab    key.Binding // "shift+tab" → cycle backward
@@ -46,6 +47,10 @@ func DefaultKeyMap() KeyMap {
 		Tab3: key.NewBinding(
 			key.WithKeys("3"),
 			key.WithHelp("3", "cost"),
+		),
+		Tab4: key.NewBinding(
+			key.WithKeys("4"),
+			key.WithHelp("4", "hooks"),
 		),
 		TabControl: key.NewBinding(
 			key.WithKeys("ctrl+g"),
