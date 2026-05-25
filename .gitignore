@@ -19,3 +19,10 @@ Thumbs.db
 # Build
 /tmp/
 result
+
+# Local shared metadata (working docs, not committed)
+AGENT_LOG.md
+PHASE1_SPEC.md
+PHASE2_SPEC.md
+ROADMAP.md
+VISION.md
