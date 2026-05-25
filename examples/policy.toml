@@ -1,0 +1,18 @@
+[budget]
+session_max_usd = 5.0
+daily_max_usd = 50.0
+warn_at_fraction = 0.8
+
+[tools]
+denylist = [
+    "Bash:rm -rf*",
+    "Bash:dd if=*",
+    "Bash:mkfs*",
+    "WebFetch:*.onion*",
+]
+allowlist = []
+
+[models.pricing]
+"claude-sonnet-4-6" = { input = 3.0, output = 15.0 }
+"claude-opus-4-7" = { input = 15.0, output = 75.0 }
+"claude-haiku-4-5-20251001" = { input = 0.25, output = 1.25 }

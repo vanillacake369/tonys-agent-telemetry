@@ -14,6 +14,7 @@ TUI dashboard for Claude Code sessions, agents, DAG visualization, and skill mar
 - **Agents** — Browse and launch configured agents from a searchable list
 - **DAG** — Live agent orchestration graph showing real-time tool calls and sub-agent delegation
 - **Skills** — Search the skill marketplace (local and GitHub-sourced skills with fuzzy filtering)
+- **Control** — Runtime governance: per-session/per-day USD budget caps, tool allow/denylists, live denial log
 
 ## Installation
 
@@ -61,19 +62,48 @@ tonys-agent-telemetry --version
 
 ### Key Bindings
 
-| Key      | Action                  |
-|----------|-------------------------|
-| `Ctrl+S` | Switch to Sessions tab  |
-| `Ctrl+A` | Switch to Agents tab    |
-| `Ctrl+D` | Switch to DAG tab       |
-| `Ctrl+K` | Switch to Skills tab    |
-| `Enter`  | Select / confirm        |
-| `Esc`    | Back / cancel           |
-| `Ctrl+F` | Fork session            |
-| `Ctrl+N` | New session             |
-| `Ctrl+Y` | Copy to clipboard       |
-| `Ctrl+R` | Refresh                 |
-| `q`      | Quit                    |
+| Key          | Action                                  |
+|--------------|-----------------------------------------|
+| `1`          | Switch to Sessions tab                  |
+| `2`          | Switch to Agents tab                    |
+| `3`          | Switch to DAG tab                       |
+| `4`          | Switch to Skills tab                    |
+| `Ctrl+G`     | Switch to Control tab (Governance)      |
+| `Tab`        | Next tab                                |
+| `Shift+Tab`  | Previous tab                            |
+| `Enter`      | Select / confirm                        |
+| `Esc`        | Back / cancel search                    |
+| `r`          | Refresh current tab                     |
+| `f`          | Fork session (Sessions tab)             |
+| `y`          | Copy to clipboard                       |
+| `s`          | Sort (Skills tab)                       |
+| `o`          | Open in browser (Skills tab)            |
+| `/`          | Focus search                            |
+| `?`          | Which-key help overlay                  |
+| `q`          | Quit                                    |
+
+#### Control tab keys
+
+| Key | Action                                         |
+|-----|------------------------------------------------|
+| `r` | Reload budgets and denials from disk           |
+| `e` | Open `policy.toml` in `$EDITOR`               |
+| `c` | Clear denial log                               |
+
+## Control Plane (Phase 2)
+
+`tonys-agent-telemetry` can enforce runtime policies on your Claude Code sessions:
+- Per-session and per-day USD budget caps
+- Tool allowlists/denylists (e.g., block `rm -rf` globally)
+- Live observability of budget burn-down
+
+Configure via `~/.config/tonys-agent-telemetry/policy.toml`. See [example policy](./examples/policy.toml).
+
+When a policy violation triggers, the hook returns exit code 2 to Claude Code,
+which surfaces the denial message to the model as a tool error. The agent
+typically reacts by trying a different approach or asking for guidance.
+
+Press `Ctrl+G` to view the Control tab with live budget bars and denial log.
 
 ## Hook Setup
 
@@ -117,8 +147,10 @@ The hook handler reads the JSON payload from stdin and writes it to the FIFO. It
 ```
 .
 ├── main.go                    # TUI entry point; version injection target
-├── cmd/hook-handler/main.go   # Hook handler binary (stdin → FIFO)
+├── cmd/hook-handler/main.go   # Hook handler binary (stdin → FIFO + policy enforcement)
+├── examples/policy.toml       # Sample policy configuration
 └── internal/
+    ├── control/               # Policy loading, budget store, denial log, decision engine
     ├── data/                  # Session/agent data loading (JSONL parser, models)
     ├── event/                 # FIFO write logic for real-time hook events
     ├── platform/              # OS detection, clipboard, terminal utilities
@@ -128,10 +160,11 @@ The hook handler reads the JSON payload from stdin and writes it to the FIFO. It
 
 ### Key packages
 
+- `internal/control` — policy TOML loading (fail-open), budget accumulation with flock, denial JSONL log, decision engine
 - `internal/data` — reads `~/.claude/projects/**/*.jsonl` session files and agent metadata
 - `internal/event` — non-blocking FIFO write with timeout; silent no-op when TUI is not running
 - `internal/skill` — local skill scanner + GitHub API fetcher with disk cache
-- `internal/tui` — four-tab Bubbletea application; DAG renderer for agent orchestration graphs
+- `internal/tui` — five-tab Bubbletea application; DAG renderer for agent orchestration graphs
 
 ## Requirements
 

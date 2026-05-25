@@ -105,6 +105,10 @@ func main() {
 	fmt.Print("Multi-provider discovery... ")
 	testProviders()
 
+	// P2 Control Plane integration tests.
+	fmt.Println("\n--- Control Plane (P2) ---")
+	failed += runControlTests()
+
 	fmt.Printf("\n=== Results: %d failures ===\n", failed)
 	if failed > 0 {
 		os.Exit(1)
