@@ -15,8 +15,8 @@ func TestBucket_IsEmpty(t *testing.T) {
 	}{
 		{"zero value", Bucket{}, true},
 		{"only sessions", Bucket{Sessions: 1}, false},
-		{"only counts", Bucket{Counts: map[signal.SignalType]int{signal.SignalTypeStalledNode: 1}}, false},
-		{"both", Bucket{Sessions: 1, Counts: map[signal.SignalType]int{signal.SignalTypeStalledNode: 1}}, false},
+		{"only counts", Bucket{Counts: map[signal.SignalType]int{signal.SignalStalledNode: 1}}, false},
+		{"both", Bucket{Sessions: 1, Counts: map[signal.SignalType]int{signal.SignalStalledNode: 1}}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -32,9 +32,9 @@ func TestBucket_Total(t *testing.T) {
 		Start:    time.Now(),
 		Duration: 24 * time.Hour,
 		Counts: map[signal.SignalType]int{
-			signal.SignalTypeStalledNode:            3,
-			signal.SignalTypeDuplicateSubagentWork:  2,
-			signal.SignalTypeFailedHandoff:          1,
+			signal.SignalStalledNode:            3,
+			signal.SignalDuplicateSubagentWork:  2,
+			signal.SignalFailedHandoff:          1,
 		},
 		Sessions: 4,
 	}
