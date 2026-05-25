@@ -11,6 +11,27 @@ import (
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/telemetry"
 )
 
+// TestResolveBindAddr_Default asserts that when TONYS_OTLP_BIND is unset,
+// the resolved bind address defaults to localhost-only (127.0.0.1:4318),
+// never 0.0.0.0. See PIVOT_PLAN.md security gate (QA finding #3, P0).
+func TestResolveBindAddr_Default(t *testing.T) {
+	t.Setenv("TONYS_OTLP_BIND", "")
+	got := resolveBindAddr()
+	if got != "127.0.0.1:4318" {
+		t.Errorf("resolveBindAddr() = %q, want 127.0.0.1:4318", got)
+	}
+}
+
+// TestResolveBindAddr_EnvOverride asserts that TONYS_OTLP_BIND, when set,
+// overrides the default — allowing operators to opt in to a wider bind scope.
+func TestResolveBindAddr_EnvOverride(t *testing.T) {
+	t.Setenv("TONYS_OTLP_BIND", "0.0.0.0:14318")
+	got := resolveBindAddr()
+	if got != "0.0.0.0:14318" {
+		t.Errorf("resolveBindAddr() = %q, want 0.0.0.0:14318", got)
+	}
+}
+
 func TestIngestor_ProviderID(t *testing.T) {
 	if got := New().ProviderID(); got != "otlp-http" {
 		t.Errorf("ProviderID = %q, want otlp-http", got)
@@ -180,6 +201,73 @@ func TestIngest_AcceptsValidExport(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("server did not shut down on cancel")
+	}
+}
+
+// TestIngest_DoubleStartReturnsError verifies that starting two Ingestor.Ingest
+// goroutines concurrently on the same bind address results in exactly one
+// returning a non-nil error within 200ms (TOCTOU / double-bind protection).
+//
+// TONYS_OTLP_BIND is used to pick a deterministic free port so the test does
+// not interfere with a real OTLP receiver that might be using 4318.
+func TestIngest_DoubleStartReturnsError(t *testing.T) {
+	// Grab a free ephemeral port and immediately release it.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+
+	t.Setenv("TONYS_OTLP_BIND", addr)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	out1 := make(chan telemetry.Span, 1)
+	out2 := make(chan telemetry.Span, 1)
+	errCh := make(chan error, 2)
+
+	go func() {
+		ing := &Ingestor{Addr: addr}
+		errCh <- ing.Ingest(ctx, out1)
+	}()
+	go func() {
+		ing := &Ingestor{Addr: addr}
+		errCh <- ing.Ingest(ctx, out2)
+	}()
+
+	// At least one goroutine must return a non-nil (non-context) error within
+	// 200ms because both try to bind the same port.
+	deadline := time.NewTimer(200 * time.Millisecond)
+	defer deadline.Stop()
+
+	var gotErr error
+	select {
+	case e := <-errCh:
+		gotErr = e
+	case <-deadline.C:
+	}
+
+	// Cancel so the surviving goroutine also returns.
+	cancel()
+
+	if gotErr == nil {
+		// The first return might have been from ctx cancellation rather than a
+		// bind error. Drain the second result with a brief timeout.
+		select {
+		case e := <-errCh:
+			gotErr = e
+		case <-time.After(2 * time.Second):
+		}
+	}
+
+	if gotErr == nil {
+		t.Fatal("expected at least one Ingest to return a non-nil error for double-bind; got nil from both")
+	}
+	// The error must NOT be a context cancellation — it must be an address-in-use error.
+	if gotErr == context.Canceled || gotErr == context.DeadlineExceeded {
+		t.Errorf("expected bind error, got context error: %v", gotErr)
 	}
 }
 

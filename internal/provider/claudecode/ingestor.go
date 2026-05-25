@@ -12,9 +12,11 @@ package claudecode
 
 import (
 	"context"
+	"log"
 	"os"
 	"path/filepath"
 
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/provider"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/telemetry"
 )
 
@@ -54,6 +56,7 @@ func (i *Ingestor) Detect(ctx context.Context) bool {
 // not yet wired here; the existing TUI continues to consume FIFO events
 // directly via internal/event during the transition.
 func (i *Ingestor) Ingest(ctx context.Context, out chan<- telemetry.Span) error {
+	defer provider.RecoverIngest(i.ProviderID(), log.Printf)()
 	_ = i.backfill(ctx, out)
 	<-ctx.Done()
 	return ctx.Err()

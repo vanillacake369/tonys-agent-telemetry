@@ -13,28 +13,47 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"log"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/provider"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/telemetry"
 )
 
-// DefaultAddr is the OTLP/HTTP standard port.
-const DefaultAddr = ":4318"
+// DefaultAddr is the OTLP/HTTP standard port bound to localhost only.
+// Binding to 0.0.0.0 by default would allow any process on the same Docker
+// bridge or LAN to inject spans without authentication — see PIVOT_PLAN.md
+// security gate (QA finding #3, P0).
+const DefaultAddr = "127.0.0.1:4318"
 
 // MaxRequestBytes caps individual export payloads to defend against runaway
 // clients.
 const MaxRequestBytes = 16 << 20
 
-// Ingestor runs an HTTP server accepting OTLP/JSON exports at /v1/traces.
-type Ingestor struct {
-	Addr string // default ":4318"
+// resolveBindAddr returns the address to listen on. If the environment
+// variable TONYS_OTLP_BIND is set and non-empty, it takes precedence over
+// DefaultAddr. This opt-in is intentional: operators who need LAN-accessible
+// ingest (e.g. sidecar containers) must explicitly set TONYS_OTLP_BIND=0.0.0.0:4318.
+// See PIVOT_PLAN.md security gate (QA finding #3, P0).
+func resolveBindAddr() string {
+	if v := os.Getenv("TONYS_OTLP_BIND"); v != "" {
+		return v
+	}
+	return DefaultAddr
 }
 
-// New returns an Ingestor bound to the default address.
-func New() *Ingestor { return &Ingestor{Addr: DefaultAddr} }
+// Ingestor runs an HTTP server accepting OTLP/JSON exports at /v1/traces.
+type Ingestor struct {
+	Addr string // default "127.0.0.1:4318"
+}
+
+// New returns an Ingestor bound to the resolved address (TONYS_OTLP_BIND env
+// var if set, otherwise DefaultAddr "127.0.0.1:4318").
+func New() *Ingestor { return &Ingestor{Addr: resolveBindAddr()} }
 
 // ProviderID returns "otlp-http".
 func (i *Ingestor) ProviderID() string { return "otlp-http" }
@@ -55,6 +74,7 @@ func (i *Ingestor) Detect(ctx context.Context) bool {
 // cancellation. Each incoming OTLP export is parsed and translated into
 // telemetry.Span values streamed to out.
 func (i *Ingestor) Ingest(ctx context.Context, out chan<- telemetry.Span) error {
+	defer provider.RecoverIngest(i.ProviderID(), log.Printf)()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/traces", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -87,6 +107,7 @@ func (i *Ingestor) Ingest(ctx context.Context, out chan<- telemetry.Span) error 
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+	log.Printf("otlp: listening on %s (set TONYS_OTLP_BIND to override)", i.Addr)
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
 

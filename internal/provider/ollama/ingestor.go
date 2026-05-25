@@ -14,10 +14,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"sync"
 	"time"
 
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/provider"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/telemetry"
 )
 
@@ -80,6 +82,7 @@ func (i *Ingestor) Detect(ctx context.Context) bool {
 // Ingest polls /api/ps until ctx is cancelled. Emits one Span the first
 // time a model appears as loaded.
 func (i *Ingestor) Ingest(ctx context.Context, out chan<- telemetry.Span) error {
+	defer provider.RecoverIngest(i.ProviderID(), log.Printf)()
 	ticker := time.NewTicker(i.PollInterval)
 	defer ticker.Stop()
 

@@ -14,11 +14,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/provider"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/telemetry"
 )
 
@@ -79,6 +81,7 @@ func (i *Ingestor) Detect(ctx context.Context) bool {
 // Ingest polls the metrics endpoint, computes deltas, and emits Spans.
 // Stops when ctx is cancelled. Transient HTTP errors are ignored.
 func (i *Ingestor) Ingest(ctx context.Context, out chan<- telemetry.Span) error {
+	defer provider.RecoverIngest(i.ProviderID(), log.Printf)()
 	ticker := time.NewTicker(i.PollInterval)
 	defer ticker.Stop()
 
