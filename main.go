@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -16,6 +17,8 @@ import (
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/provider/ollama"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/provider/otlp"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/provider/vllm"
+	sinkotlp "github.com/vanillacake369/tonys-agent-telemetry/internal/sink/otlp"
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/snapshot"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/telemetry"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/tui"
 )
@@ -23,6 +26,15 @@ import (
 var version = "dev"
 
 func main() {
+	// Phase 4 CLI flags. Defined via flag package; parse only when no
+	// version/help short-circuit applies, so legacy callers keep working.
+	exportURL := flag.String("otlp-export", os.Getenv("TAT_OTLP_EXPORT"),
+		"Forward collected spans to a remote OTLP/JSON URL (e.g. http://tempo:4318/v1/traces).")
+	snapshotFile := flag.String("snapshot-record", os.Getenv("TAT_SNAPSHOT_RECORD"),
+		"Append every collected span to this JSONL file for later replay/debug.")
+	replayFile := flag.String("replay", "",
+		"Read spans from this JSONL file instead of starting live providers.")
+
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "--version", "-v":
@@ -33,6 +45,7 @@ func main() {
 			return
 		}
 	}
+	flag.Parse()
 
 	// Suppress log output during TUI — stderr corrupts the alt screen.
 	// Use --debug flag or TAT_DEBUG=1 to enable logging to a file.
@@ -59,30 +72,62 @@ func main() {
 		defer event.RemoveFIFO()
 	}
 
-	// Start the telemetry registry. Registers every provider adapter; each
-	// Detect() runs in priority order and only those that report present
-	// have their Ingest() goroutines started. Registration order doubles
-	// as detection priority — register the more specific detectors first.
 	telCtx, telCancel := context.WithCancel(context.Background())
 	defer telCancel()
-	reg := telemetry.NewRegistry()
-	reg.Register(claudecode.New()) // ~/.claude — no port collision
-	reg.Register(otlp.New())       // listens on :4318 if free
-	reg.Register(vllm.New())       // probes :8000 /metrics with vllm: prefix
-	reg.Register(ollama.New())     // probes :11434 /api/tags
 	spans := make(chan telemetry.Span, 256)
-	go reg.StartAll(telCtx, spans)
+
+	if *replayFile != "" {
+		// Replay mode: bypass live providers, stream from snapshot file.
+		go func() {
+			defer close(spans)
+			_ = snapshot.NewPlayer(*replayFile).Run(telCtx, spans)
+		}()
+	} else {
+		// Live mode: start every detected provider.
+		reg := telemetry.NewRegistry()
+		reg.Register(claudecode.New()) // ~/.claude — no port collision
+		reg.Register(otlp.New())       // listens on :4318 if free
+		reg.Register(vllm.New())       // probes :8000 /metrics with vllm: prefix
+		reg.Register(ollama.New())     // probes :11434 /api/tags
+		go reg.StartAll(telCtx, spans)
+	}
 
 	p := tea.NewProgram(tui.NewApp(), tea.WithAltScreen())
 
-	// Route collected spans into Bubbletea as SpanCollectedMsg so the
-	// DAG tab (and any future consumer) receives them via the normal
-	// message loop.
+	// Fan-out: every collected span goes to (1) the TUI as a Bubbletea
+	// message, (2) an optional remote OTLP forwarder, (3) an optional
+	// snapshot recorder. Sinks consume from their own buffered channels
+	// so a slow remote endpoint can't block the producing pipeline.
+	tuiCh, exportCh, recordCh := splitChannel(telCtx, spans)
 	go func() {
-		for sp := range spans {
+		for sp := range tuiCh {
 			p.Send(tui.SpanCollectedMsg{Span: sp})
 		}
 	}()
+	if *exportURL != "" {
+		exp := sinkotlp.New(*exportURL)
+		go func() { _ = exp.Run(telCtx, exportCh) }()
+	} else {
+		go func() { // drain to keep splitChannel happy
+			for range exportCh {
+			}
+		}()
+	}
+	if *snapshotFile != "" {
+		if rec, err := snapshot.NewRecorder(*snapshotFile); err == nil {
+			go func() { _ = rec.Run(telCtx, recordCh) }()
+		} else {
+			go func() {
+				for range recordCh {
+				}
+			}()
+		}
+	} else {
+		go func() {
+			for range recordCh {
+			}
+		}()
+	}
 
 	// SIGTERM/SIGHUP: gracefully ask Bubbletea to quit so the terminal is
 	// restored cleanly (alt-screen exit + raw mode reset). Without this, a
@@ -102,18 +147,66 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Print(`tonys-agent-telemetry - TUI dashboard for AI coding agents
-
-Supported providers: Claude, Codex (OpenAI), Gemini (Google)
+	fmt.Print(`tonys-agent-telemetry - local-first control plane for LLM agents
 
 Usage:
-  tonys-agent-telemetry              Launch TUI (default: sessions tab)
+  tonys-agent-telemetry              Launch TUI with auto-detected providers
   tonys-agent-telemetry --version    Print version
   tonys-agent-telemetry --help       Print this help
 
-Tabs (switch with 1/2/3):
-  Sessions    Browse & resume sessions across all providers (C/X/G badge)
-  Skills      Search skill marketplace
-  Cost        Aggregated cost/usage dashboard by provider, model, project
+Flags:
+  --otlp-export URL        Forward spans to a remote OTLP/JSON endpoint
+                           (also via TAT_OTLP_EXPORT env)
+  --snapshot-record FILE   Append every span to FILE for later replay
+                           (also via TAT_SNAPSHOT_RECORD env)
+  --replay FILE            Read spans from FILE instead of live providers
+
+Tabs (1-5 + Ctrl+G):
+  Sessions  Browse & resume Claude Code sessions
+  Skills    Search the skill marketplace
+  Cost      Cost/usage by provider, model, project
+  Hooks     Visualize ~/.claude/settings.json hook config
+  DAG       Live agent orchestration graph (all providers)
+  Control   Runtime governance (Ctrl+G): budget caps + tool deny/allowlist
 `)
+}
+
+// splitChannel fans out a single Span source into three downstream channels
+// with their own buffers. Downstream consumers that block (e.g. slow remote
+// OTLP endpoint) don't backpressure the source — the buffer absorbs and
+// further spans are dropped only for that branch when it fills.
+func splitChannel(ctx context.Context, in <-chan telemetry.Span) (tuiCh, exportCh, recordCh chan telemetry.Span) {
+	tuiCh = make(chan telemetry.Span, 256)
+	exportCh = make(chan telemetry.Span, 256)
+	recordCh = make(chan telemetry.Span, 256)
+	go func() {
+		defer close(tuiCh)
+		defer close(exportCh)
+		defer close(recordCh)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case sp, ok := <-in:
+				if !ok {
+					return
+				}
+				// Each downstream gets non-blocking try-sends so one slow
+				// consumer cannot stall the others.
+				select {
+				case tuiCh <- sp:
+				default:
+				}
+				select {
+				case exportCh <- sp:
+				default:
+				}
+				select {
+				case recordCh <- sp:
+				default:
+				}
+			}
+		}
+	}()
+	return
 }
