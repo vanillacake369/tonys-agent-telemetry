@@ -284,6 +284,41 @@ func TestEngine_Determinism(t *testing.T) {
 	}
 }
 
+// TestEngine_Determinism_ByteIdentical_WithFixedClock asserts that injecting a
+// fixed clock makes every field (including CreatedAt) byte-identical between
+// runs. This is the contract Phase 3 snapshot persistence requires when
+// storing Recommendation across processes (QA finding Res-4 — caller-injected
+// CreatedAt).
+func TestEngine_Determinism_ByteIdentical_WithFixedClock(t *testing.T) {
+	fixed := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+	eng := NewEngine()
+	eng.Now = func() time.Time { return fixed }
+
+	sigs := []signal.Signal{
+		makeSignal("sig-stall-001", signal.SignalStalledNode, map[string]any{"tool_name": "bash"}),
+		makeSignal("sig-dup-001", signal.SignalDuplicateSubagentWork, map[string]any{}),
+	}
+	items := []catalog.Item{
+		makeItem("skill/shell", "Shell", []string{"shell", "performance"}, 4),
+		makeItem("skill/orch", "Orchestration", []string{"orchestration", "fan-out"}, 3),
+	}
+
+	recs1 := eng.Recommend(sigs, items)
+	recs2 := eng.Recommend(sigs, items)
+
+	// Full byte-identical comparison including CreatedAt.
+	b1, _ := json.Marshal(recs1)
+	b2, _ := json.Marshal(recs2)
+	if string(b1) != string(b2) {
+		t.Errorf("with fixed clock, two Recommend calls should produce byte-identical JSON:\nrun1: %s\nrun2: %s", b1, b2)
+	}
+	for i, r := range recs1 {
+		if !r.CreatedAt.Equal(fixed) {
+			t.Errorf("recs1[%d].CreatedAt = %v, want fixed clock %v", i, r.CreatedAt, fixed)
+		}
+	}
+}
+
 // TestEngine_GAGate_EmptySignalID asserts that a Signal with an empty ID
 // cannot produce a Recommendation (the path is unreachable because the engine
 // skips signals with empty IDs — documented in engine.go).

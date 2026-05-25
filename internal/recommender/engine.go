@@ -38,13 +38,23 @@ type Engine struct {
 	// MaxPerSignal is the maximum number of recommendations emitted per signal.
 	// Default: 3. Non-positive values are treated as 1.
 	MaxPerSignal int
+
+	// Now is the clock used to populate Recommendation.CreatedAt. Defaults to
+	// time.Now. Tests inject a fixed clock to obtain byte-identical
+	// determinism on the entire Recommendation struct (otherwise CreatedAt
+	// nanoseconds always differ between calls). Callers wishing to persist
+	// recommendations across processes (Phase 3+ snapshot) should also
+	// inject a deterministic clock or zero the field after Recommend.
+	Now func() time.Time
 }
 
-// NewEngine returns an Engine with default configuration.
+// NewEngine returns an Engine with default configuration. Now defaults to
+// time.Now; replace it in tests for deterministic output.
 func NewEngine() *Engine {
 	return &Engine{
 		Threshold:    defaultThreshold,
 		MaxPerSignal: defaultMaxPerSignal,
+		Now:          time.Now,
 	}
 }
 
@@ -69,7 +79,11 @@ func (e *Engine) Recommend(signals []signal.Signal, items []catalog.Item) []Reco
 	}
 
 	var out []Recommendation
-	now := time.Now()
+	clock := e.Now
+	if clock == nil {
+		clock = time.Now
+	}
+	now := clock()
 
 	for _, sig := range signals {
 		// GA gate: skip signals with empty IDs. A signal with no ID cannot
@@ -121,6 +135,7 @@ func (e *Engine) Recommend(signals []signal.Signal, items []catalog.Item) []Reco
 		for _, c := range candidates {
 			rec := Recommendation{
 				SignalID:      sig.ID,
+				TraceID:       sig.TraceID,
 				CatalogItemID: c.item.ID,
 				Title:         c.item.Title,
 				Reasoning:     humanReadable(sig, c.item, candidateTags, c.score),

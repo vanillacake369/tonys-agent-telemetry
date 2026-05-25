@@ -11,6 +11,12 @@ type Recommendation struct {
 	// this recommendation. Must be non-empty in every valid Recommendation.
 	SignalID string
 
+	// TraceID is the trace this signal was observed in. Carried alongside
+	// SignalID so the UI can offer a "navigate to DAG" affordance without
+	// having to re-resolve via SignalID lookup. Empty for cross-trace signals
+	// like unused_installed_skill (where there is no specific trace).
+	TraceID string
+
 	// CatalogItemID is the citation identifying which catalog item (from the
 	// Phase 1 ultimate-guide corpus) is being recommended. Must be non-empty
 	// in every valid Recommendation.
