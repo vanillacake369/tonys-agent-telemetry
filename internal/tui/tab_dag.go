@@ -237,6 +237,8 @@ func (d *DAGTab) rebuildTraces() {
 
 // flattenTrace returns the spans of one trace in depth-first order so the
 // graph view can address each by its row index for cursor navigation.
+// Uses BuildForests so traces with multiple orphan roots are fully visible
+// (BuildTrees would silently keep only one root per trace).
 func (d *DAGTab) flattenTrace(traceID string) []*telemetry.SpanNode {
 	traceSpans := make([]telemetry.Span, 0)
 	for _, s := range d.spans {
@@ -244,7 +246,7 @@ func (d *DAGTab) flattenTrace(traceID string) []*telemetry.SpanNode {
 			traceSpans = append(traceSpans, s)
 		}
 	}
-	trees := telemetry.BuildTrees(traceSpans)
+	forests := telemetry.BuildForests(traceSpans)
 	var out []*telemetry.SpanNode
 	var walk func(n *telemetry.SpanNode)
 	walk = func(n *telemetry.SpanNode) {
@@ -256,7 +258,7 @@ func (d *DAGTab) flattenTrace(traceID string) []*telemetry.SpanNode {
 			walk(c)
 		}
 	}
-	for _, root := range trees {
+	for _, root := range forests[traceID] {
 		walk(root)
 	}
 	return out
@@ -443,62 +445,69 @@ func (d *DAGTab) renderSpanView() string {
 }
 
 // renderGraph draws the trace as a true 2D DAG with box nodes connected
-// by L-shaped elbow connectors. Cols = depth, rows = pre-order traversal
-// position. The selected node is marked with a cursor arrow next to its
-// box.
+// by L-shaped elbow connectors.
 //
-// This replaces the previous nested-indent ASCII tree which users said
-// looked like a "nested bullet point list" rather than an n8n/airflow DAG.
+// Layout (n8n-style, not "col=depth"):
+//
+//	Single-child links stay in the SAME column → chain reads top-down,
+//	  one node per row, like an n8n linear workflow.
+//	Multi-child branches fan out to the next column → siblings stack
+//	  vertically at col+1, parent's trunk fans into each.
+//
+// This avoids the diagonal staircase that pure col=depth produces for
+// long Claude tool chains (which would overflow the terminal width
+// after ~6 levels).
 func (d *DAGTab) renderGraph(width int) string {
 	if len(d.flatNodes) == 0 {
 		return ""
 	}
 
-	// Layout: assign (col, row) to each node. col = depth, row = visit order.
-	// flatNodes is already in pre-order from flattenTrace, so we can use the
-	// index directly as the row.
-
-	// Compute depth per node (= longest path from any root).
+	// Chain-aware layout. Walk the forest; a single-child link inherits
+	// the parent's column (vertical chain), while a multi-child branch
+	// pushes every child to col+1 (horizontal fanout, vertically stacked
+	// by visit order).
 	idSet := map[string]bool{}
 	for _, n := range d.flatNodes {
 		idSet[n.Span.SpanID] = true
 	}
-	depthByID := map[string]int{}
-	var setDepth func(*telemetry.SpanNode, int)
-	setDepth = func(n *telemetry.SpanNode, depth int) {
-		if n == nil {
-			return
-		}
-		if existing, ok := depthByID[n.Span.SpanID]; !ok || depth > existing {
-			depthByID[n.Span.SpanID] = depth
-		}
-		for _, c := range n.Children {
-			setDepth(c, depth+1)
-		}
-	}
-	for _, n := range d.flatNodes {
-		if n.Span.ParentSpanID == "" || !idSet[n.Span.ParentSpanID] {
-			setDepth(n, 0)
-		}
-	}
-
-	positions := make([]gridPos, len(d.flatNodes))
+	var positions []gridPos
 	posByID := make(map[string]int, len(d.flatNodes))
 	maxCol := 0
-	for i, n := range d.flatNodes {
-		positions[i] = gridPos{
-			col:  depthByID[n.Span.SpanID],
-			row:  i,
-			node: n,
+	nextRow := 0
+	var visit func(*telemetry.SpanNode, int)
+	visit = func(n *telemetry.SpanNode, col int) {
+		if col > maxCol {
+			maxCol = col
 		}
-		posByID[n.Span.SpanID] = i
-		if positions[i].col > maxCol {
-			maxCol = positions[i].col
+		positions = append(positions, gridPos{col: col, row: nextRow, node: n})
+		posByID[n.Span.SpanID] = len(positions) - 1
+		nextRow++
+		switch len(n.Children) {
+		case 0:
+			// leaf
+		case 1:
+			visit(n.Children[0], col) // chain — same column
+		default:
+			for _, c := range n.Children {
+				visit(c, col+1) // branch — all siblings to col+1
+			}
+		}
+	}
+	// Top-level roots: walk those whose parent isn't in this trace.
+	for _, n := range d.flatNodes {
+		if _, seen := posByID[n.Span.SpanID]; seen {
+			continue
+		}
+		if n.Span.ParentSpanID == "" || !idSet[n.Span.ParentSpanID] {
+			if len(positions) > 0 {
+				nextRow++ // blank row between separate root subtrees
+			}
+			visit(n, 0)
 		}
 	}
 
 	const (
-		nodeW = 16 // chars per box including borders
+		nodeW = 22 // chars per box including borders (room for label)
 		nodeH = 3  // lines per box
 		hgap  = 6  // chars between columns (room for elbow)
 		vgap  = 1  // blank lines between rows
@@ -506,8 +515,16 @@ func (d *DAGTab) renderGraph(width int) string {
 	pitchX := nodeW + hgap
 	pitchY := nodeH + vgap
 
+	// gridH must derive from the LAST occupied row (positions are sparse
+	// when orphan-subtree gaps insert blank rows), not len(positions).
+	maxRow := 0
+	for _, p := range positions {
+		if p.row > maxRow {
+			maxRow = p.row
+		}
+	}
 	gridW := (maxCol+1)*pitchX - hgap
-	gridH := len(positions)*pitchY - vgap
+	gridH := (maxRow+1)*pitchY - vgap
 	if gridH < 1 {
 		gridH = 1
 	}
@@ -529,15 +546,13 @@ func (d *DAGTab) renderGraph(width int) string {
 		drawBox(grid, x, y, nodeW, nodeH, nodeLabel(p.node.Span))
 	}
 
-	// Draw connectors for each parent → child relation. We do one
-	// connector group per parent so a parent with multiple children gets
-	// a proper trunk with ┬ at the top and ├/└ at each branch off.
+	// Draw connectors. Chain (single child, same col) gets a vertical line
+	// between parent and child; branch (multi child or differing col) gets
+	// the trunk-and-elbow group routing.
 	for _, p := range positions {
 		if len(p.node.Children) == 0 {
 			continue
 		}
-		// Filter to children we actually have positions for (handles
-		// cross-trace pointers if any slip through).
 		var kids []gridPos
 		for _, c := range p.node.Children {
 			if idx, ok := posByID[c.Span.SpanID]; ok {
@@ -547,7 +562,11 @@ func (d *DAGTab) renderGraph(width int) string {
 		if len(kids) == 0 {
 			continue
 		}
-		drawConnectorGroup(grid, p, kids, nodeW, nodeH, pitchX, pitchY)
+		if len(kids) == 1 && kids[0].col == p.col {
+			drawChainConnector(grid, p, kids[0], nodeW, nodeH, pitchX, pitchY)
+		} else {
+			drawConnectorGroup(grid, p, kids, nodeW, nodeH, pitchX, pitchY)
+		}
 	}
 
 	// Convert grid to string, applying colors per row. We can't easily
@@ -669,6 +688,24 @@ func drawBox(grid [][]rune, x, y, w, h int, label string) {
 type gridPos struct {
 	col, row int
 	node     *telemetry.SpanNode
+}
+
+// drawChainConnector draws the simple vertical link used when a parent has
+// exactly one child and the child sits in the same column (a "chain"
+// link, top to bottom). Single ▼ arrow head replaces the inter-box gap.
+func drawChainConnector(grid [][]rune, parent, child gridPos, nodeW, nodeH, pitchX, pitchY int) {
+	mid := parent.col*pitchX + nodeW/2
+	yStart := parent.row*pitchY + nodeH       // first row below parent box
+	yEnd := child.row * pitchY                // first row of child box
+	if yStart >= len(grid) || mid >= len(grid[0]) {
+		return
+	}
+	for y := yStart; y < yEnd-1; y++ {
+		grid[y][mid] = '│'
+	}
+	if yEnd-1 >= 0 && yEnd-1 < len(grid) {
+		grid[yEnd-1][mid] = '▼'
+	}
 }
 
 // childRow is the y-coordinate + col of a node, used internally by
@@ -892,22 +929,41 @@ func treeStats(node *telemetry.SpanNode) (count, depth int) {
 	return
 }
 
-// nodeLabel returns a short label for a span.
+// nodeLabel returns a short, human-readable label for a span. Prefers
+// semantic info (tool/operation + token totals) over the long opaque ID.
 func nodeLabel(s telemetry.Span) string {
 	tool := s.Attrs["gen_ai.tool.name"]
 	op := s.Attrs["gen_ai.operation.name"]
-	tokens := ""
+	var head string
+	switch {
+	case tool != "":
+		head = tool
+	case op != "":
+		head = op
+	default:
+		head = "span"
+	}
 	if s.InputTokens > 0 || s.OutputTokens > 0 {
-		tokens = fmt.Sprintf("  [%d/%d]", s.InputTokens, s.OutputTokens)
+		// Compact "1.5k/420" form so long counts fit in 20 chars.
+		return fmt.Sprintf("%s %s", head, fmtTokens(s.InputTokens, s.OutputTokens))
 	}
-	id := shortID(s.SpanID)
-	if tool != "" {
-		return fmt.Sprintf("%s  %s%s", id, tool, tokens)
+	// Append short ID as a disambiguator when no token info.
+	return fmt.Sprintf("%s %s", head, shortID(s.SpanID))
+}
+
+// fmtTokens renders an input/output pair compactly (uses k suffix for ≥1000).
+func fmtTokens(in, out int) string {
+	return compactInt(in) + "/" + compactInt(out)
+}
+
+func compactInt(n int) string {
+	if n >= 1000 {
+		if n >= 100000 {
+			return fmt.Sprintf("%dk", n/1000)
+		}
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
 	}
-	if op != "" {
-		return fmt.Sprintf("%s  %s%s", id, op, tokens)
-	}
-	return id + tokens
+	return fmt.Sprintf("%d", n)
 }
 
 // truncate trims s to n runes (also used by tab_dag_test.go).

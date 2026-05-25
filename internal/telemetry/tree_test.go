@@ -86,6 +86,21 @@ func TestBuildTrees_DeepChain(t *testing.T) {
 	}
 }
 
+// BuildForests preserves every orphan root within a trace. BuildTrees
+// used to overwrite earlier roots when later spans within the same trace
+// had no findable parent — a real bug for partially-loaded sessions.
+func TestBuildForests_PreservesAllOrphans(t *testing.T) {
+	spans := []Span{
+		{TraceID: "t", SpanID: "a"},
+		{TraceID: "t", SpanID: "b", ParentSpanID: "missing-1"},
+		{TraceID: "t", SpanID: "c", ParentSpanID: "missing-2"},
+	}
+	forest := BuildForests(spans)
+	if len(forest["t"]) != 3 {
+		t.Errorf("got %d roots, want 3 (all orphans preserved)", len(forest["t"]))
+	}
+}
+
 func TestBuildTrees_SiblingChildren(t *testing.T) {
 	spans := []Span{
 		{TraceID: "t1", SpanID: "root"},
