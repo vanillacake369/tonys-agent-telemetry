@@ -58,6 +58,7 @@ type App struct {
 	searchFocused bool // when true, key events pass directly to the active tab
 	whichKey      WhichKeyOverlay
 	fifoEvents    <-chan event.Event // nil when FIFO is not active
+	fifoCtx       context.Context
 	fifoCancel    context.CancelFunc
 }
 
@@ -79,11 +80,23 @@ func NewApp() App {
 		TabDAG:      NewDAGTab(),
 		TabSkills:   NewSkillsTab(),
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	return App{
 		activeTab:     TabSessions,
 		tabs:          tabs,
 		keys:          keys,
 		searchFocused: false,
+		fifoCtx:       ctx,
+		fifoCancel:    cancel,
+	}
+}
+
+// CancelFIFO cancels the FIFO context, stopping any goroutines that listen for
+// real-time events. Safe to call multiple times. Called from main.go after
+// p.Run() returns as defense-in-depth alongside the QuitMsg intercept.
+func (a App) CancelFIFO() {
+	if a.fifoCancel != nil {
+		a.fifoCancel()
 	}
 }
 
@@ -97,16 +110,20 @@ func (a App) Init() tea.Cmd {
 
 	// Start listening for real-time events if the TUI FIFO exists.
 	if info, err := os.Stat(event.DefaultFIFOPath); err == nil && info.Mode()&os.ModeNamedPipe != 0 {
-		ctx, cancel := context.WithCancel(context.Background())
-		a.fifoCancel = cancel
-		a.fifoEvents = event.ReadFIFO(ctx)
-		cmds = append(cmds, event.ListenForEvents(ctx, a.fifoEvents))
+		a.fifoEvents = event.ReadFIFO(a.fifoCtx)
+		cmds = append(cmds, event.ListenForEvents(a.fifoCtx, a.fifoEvents))
 	}
 
 	return tea.Batch(cmds...)
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if _, ok := msg.(tea.QuitMsg); ok {
+		if a.fifoCancel != nil {
+			a.fifoCancel()
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
@@ -119,8 +136,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		updated, cmd := a.tabs[a.activeTab].Update(msg)
 		a.tabs[a.activeTab] = updated
 		var listenCmd tea.Cmd
-		if a.fifoEvents != nil {
-			listenCmd = event.ListenForEvents(context.Background(), a.fifoEvents)
+		if a.fifoEvents != nil && a.fifoCtx != nil {
+			listenCmd = event.ListenForEvents(a.fifoCtx, a.fifoEvents)
 		}
 		return a, tea.Batch(cmd, listenCmd)
 

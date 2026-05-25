@@ -51,7 +51,8 @@ func main() {
 		defer event.RemoveFIFO()
 	}
 
-	p := tea.NewProgram(tui.NewApp(), tea.WithAltScreen())
+	app := tui.NewApp()
+	p := tea.NewProgram(app, tea.WithAltScreen())
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGHUP)
@@ -64,6 +65,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+	app.CancelFIFO()
 }
 
 func printUsage() {

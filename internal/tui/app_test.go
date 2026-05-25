@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -300,5 +301,46 @@ func TestApp_TabSwitchDoesNotLoseSize(t *testing.T) {
 	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	if a.width != 100 || a.height != 30 {
 		t.Errorf("size lost after tab switch: width=%d height=%d", a.width, a.height)
+	}
+}
+
+func TestApp_FIFOCancelCalledOnQuitMsg(t *testing.T) {
+	a := NewApp()
+	// fifoCtx must be set by NewApp.
+	if a.fifoCtx == nil {
+		t.Fatal("fifoCtx should be non-nil after NewApp()")
+	}
+	if a.fifoCancel == nil {
+		t.Fatal("fifoCancel should be non-nil after NewApp()")
+	}
+
+	// Verify context is not yet cancelled.
+	if a.fifoCtx.Err() != nil {
+		t.Fatal("fifoCtx should not be cancelled before QuitMsg")
+	}
+
+	// Capture the context before update so we can check it after.
+	ctx := a.fifoCtx
+
+	// Deliver a QuitMsg — fifoCancel must be invoked.
+	_, _ = a.Update(tea.QuitMsg{})
+
+	if ctx.Err() != context.Canceled {
+		t.Error("fifoCancel was not called on tea.QuitMsg")
+	}
+}
+
+func TestApp_CancelFIFO_CancelsContext(t *testing.T) {
+	a := NewApp()
+	ctx := a.fifoCtx
+
+	if ctx.Err() != nil {
+		t.Fatal("fifoCtx should not be cancelled before CancelFIFO()")
+	}
+
+	a.CancelFIFO()
+
+	if ctx.Err() != context.Canceled {
+		t.Error("CancelFIFO() did not cancel fifoCtx")
 	}
 }
