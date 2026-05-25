@@ -68,6 +68,7 @@ type App struct {
 	whichKey      WhichKeyOverlay
 	detailView    *DetailView // non-nil when detail overlay is open
 	fifoEvents    <-chan event.Event // nil when FIFO is not active
+	fifoCtx       context.Context    // owns the lifecycle of fifo goroutines
 	fifoCancel    context.CancelFunc
 }
 
@@ -109,6 +110,7 @@ func (a App) Init() tea.Cmd {
 	// Start listening for real-time events if the TUI FIFO exists.
 	if info, err := os.Stat(event.DefaultFIFOPath); err == nil && info.Mode()&os.ModeNamedPipe != 0 {
 		ctx, cancel := context.WithCancel(context.Background())
+		a.fifoCtx = ctx
 		a.fifoCancel = cancel
 		a.fifoEvents = event.ReadFIFO(ctx)
 		cmds = append(cmds, event.ListenForEvents(ctx, a.fifoEvents))
@@ -166,10 +168,18 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		updated, cmd := a.tabs[a.activeTab].Update(msg)
 		a.tabs[a.activeTab] = updated
 		var listenCmd tea.Cmd
-		if a.fifoEvents != nil {
-			listenCmd = event.ListenForEvents(context.Background(), a.fifoEvents)
+		if a.fifoEvents != nil && a.fifoCtx != nil {
+			listenCmd = event.ListenForEvents(a.fifoCtx, a.fifoEvents)
 		}
 		return a, tea.Batch(cmd, listenCmd)
+
+	case tea.QuitMsg:
+		// Cancel the FIFO context so its goroutines unblock and exit, instead of
+		// leaking past process shutdown.
+		if a.fifoCancel != nil {
+			a.fifoCancel()
+		}
+		return a, nil
 
 	case event.FIFOClosedMsg:
 		// FIFO channel closed — stop subscribing.
