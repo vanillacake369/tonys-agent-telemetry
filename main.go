@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	xterm "github.com/charmbracelet/x/term"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/event"
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/provider/claudecode"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/telemetry"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/tui"
 )
@@ -53,8 +54,11 @@ func main() {
 		defer event.RemoveFIFO()
 	}
 
-	// Telemetry registry — no ingestors registered yet (S2 wires ClaudeCodeIngestor).
+	// Telemetry registry — ClaudeCodeIngestor registered here.
+	// App ignores spans channel until S5; both the existing FIFO path and the
+	// ingestor path run in parallel during S2-S4 (no regression in UI behavior).
 	reg := telemetry.NewRegistry()
+	reg.Register(claudecode.NewIngestor(event.DefaultFIFOPath))
 	spans := make(chan telemetry.Span, 64)
 	ctx, cancelTel := context.WithCancel(context.Background())
 	defer cancelTel()

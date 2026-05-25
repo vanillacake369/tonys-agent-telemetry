@@ -76,12 +76,12 @@ func RemoveFIFO() {
 // The goroutine exits when ctx is cancelled.
 // Handles: partial reads, malformed data, and FIFO reopening after writer disconnects.
 func ReadFIFO(ctx context.Context) <-chan Event {
-	return readFIFOFromPath(ctx, DefaultFIFOPath)
+	return ReadFIFOFromPath(ctx, DefaultFIFOPath)
 }
 
-// readFIFOFromPath is the internal implementation that accepts an explicit path.
-// This allows tests to override the path without touching global state.
-func readFIFOFromPath(ctx context.Context, fifoPath string) <-chan Event {
+// ReadFIFOFromPath is the internal implementation that accepts an explicit path.
+// This allows tests and the claudecode ingestor to override the path.
+func ReadFIFOFromPath(ctx context.Context, fifoPath string) <-chan Event {
 	ch := make(chan Event, 16)
 
 	go func() {
@@ -152,8 +152,28 @@ func readFIFOFromPath(ctx context.Context, fifoPath string) <-chan Event {
 	return ch
 }
 
-// parseLine parses a single line of the format "HOOKTYPE\tJSON_PAYLOAD".
+// V2SpanHookType is the synthetic HookType used for v2 span-shaped FIFO lines.
+// Consumers that receive this hook type should treat Payload as a full v2 span JSON.
+const V2SpanHookType = "__v2_span__"
+
+// parseLine parses a single line from the FIFO.
+// Supports two formats:
+//
+//	v1 (legacy): "HOOKTYPE\tJSON_PAYLOAD"
+//	v2 (span):   {"v":2,"trace_id":"...","span_id":"...",...}
+//
+// v2 is detected by a leading JSON object whose "v" field equals 2.
+// v2 lines are returned with HookType set to V2SpanHookType.
 func parseLine(line string) (Event, error) {
+	// fast peek: detect v2 before attempting full parse
+	var probe struct {
+		V int `json:"v"`
+	}
+	if json.Unmarshal([]byte(line), &probe) == nil && probe.V == 2 {
+		return Event{HookType: V2SpanHookType, Payload: json.RawMessage(line)}, nil
+	}
+
+	// v1: "HOOKTYPE\tJSON_PAYLOAD"
 	idx := strings.IndexByte(line, '\t')
 	if idx < 0 {
 		return Event{}, fmt.Errorf("missing tab separator in line: %q", line)
@@ -174,7 +194,21 @@ func parseLine(line string) (Event, error) {
 
 // WriteToFIFO writes hook payload to the FIFO if it exists.
 // Returns immediately if FIFO doesn't exist (TUI not running).
+// Writes in v1 format: "HOOKTYPE\tPAYLOAD\n".
 func WriteToFIFO(payload []byte, hookType string, timeout time.Duration) error {
+	msg := fmt.Sprintf("%s\t%s\n", hookType, string(payload))
+	return writeLineToFIFO([]byte(msg), timeout)
+}
+
+// WriteSpanLineToFIFO writes a raw v2 span JSON line to the FIFO.
+// The line must be a complete v2 JSON object ({"v":2,...}).
+func WriteSpanLineToFIFO(line []byte, timeout time.Duration) error {
+	msg := append(line, '\n')
+	return writeLineToFIFO(msg, timeout)
+}
+
+// writeLineToFIFO writes raw bytes to the FIFO with a timeout.
+func writeLineToFIFO(msg []byte, timeout time.Duration) error {
 	info, err := os.Stat(DefaultFIFOPath)
 	if err != nil || info.Mode()&os.ModeNamedPipe == 0 {
 		return nil // FIFO doesn't exist, TUI not running — silent no-op
@@ -189,9 +223,7 @@ func WriteToFIFO(payload []byte, hookType string, timeout time.Duration) error {
 			return
 		}
 		defer f.Close()
-
-		msg := fmt.Sprintf("%s\t%s\n", hookType, string(payload))
-		_, err = f.WriteString(msg)
+		_, err = f.Write(msg)
 		done <- err
 	}()
 

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -45,11 +46,11 @@ type rawUsage struct {
 
 // rawContentBlock is one element of a content array.
 type rawContentBlock struct {
-	Type    string          `json:"type"`
-	Text    string          `json:"text"`
-	Thinking string         `json:"thinking"`
-	Name    string          `json:"name"`
-	Input   json.RawMessage `json:"input"`
+	Type     string          `json:"type"`
+	Text     string          `json:"text"`
+	Thinking string          `json:"thinking"`
+	Name     string          `json:"name"`
+	Input    json.RawMessage `json:"input"`
 }
 
 // rawAgentInput is the input to the "Agent" tool_use.
@@ -121,6 +122,14 @@ func extractTextFromContent(raw json.RawMessage, skipThinking bool) string {
 	return strings.Join(parts, "\n")
 }
 
+// newJSONLScanner returns a bufio.Scanner with 1 MiB buffer — shared helper
+// replacing the 7 inline copies of the same pattern.
+func newJSONLScanner(f *os.File) *bufio.Scanner {
+	s := bufio.NewScanner(f)
+	s.Buffer(make([]byte, 1<<20), 1<<20)
+	return s
+}
+
 // ParseSessionHeader reads the first few lines of a JSONL file to extract
 // session metadata. Corrupted lines are skipped. Missing fields are zero values.
 // Returns an error only if the file cannot be opened or contains no usable data.
@@ -133,10 +142,7 @@ func ParseSessionHeader(filepath string) (*Session, error) {
 
 	session := &Session{FilePath: filepath}
 	foundAny := false
-	scanner := bufio.NewScanner(f)
-	// Increase buffer size for long lines.
-	buf := make([]byte, 1<<20)
-	scanner.Buffer(buf, 1<<20)
+	scanner := newJSONLScanner(f)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -217,9 +223,7 @@ func ParseConversationPreview(filepath string, maxTurns int) ([]Turn, error) {
 
 	const maxContentLen = 300
 	var turns []Turn
-	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 1<<20)
-	scanner.Buffer(buf, 1<<20)
+	scanner := newJSONLScanner(f)
 
 	for scanner.Scan() && len(turns) < maxTurns {
 		line := strings.TrimSpace(scanner.Text())
@@ -245,7 +249,9 @@ func ParseConversationPreview(filepath string, maxTurns int) ([]Turn, error) {
 			Content: truncate(text, maxContentLen),
 		})
 	}
-	// Ignore scanner.Err() for truncated-line tolerance.
+	if err := scanner.Err(); err != nil {
+		log.Printf("claudecode: scanner error in %s: %v", filepath, err)
+	}
 
 	return turns, nil
 }
@@ -307,9 +313,7 @@ func ParseDAG(sessionFilePath string) (*DAGNode, error) {
 		if err != nil {
 			return nil, err
 		}
-		scanner := bufio.NewScanner(f)
-		buf := make([]byte, 1<<20)
-		scanner.Buffer(buf, 1<<20)
+		scanner := newJSONLScanner(f)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
@@ -336,9 +340,7 @@ func ParseDAG(sessionFilePath string) (*DAGNode, error) {
 		if err != nil {
 			return nil, err
 		}
-		scanner := bufio.NewScanner(f)
-		buf := make([]byte, 1<<20)
-		scanner.Buffer(buf, 1<<20)
+		scanner := newJSONLScanner(f)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
@@ -468,9 +470,7 @@ func readSubagentStats(path string) (totalTokens int, tools []string) {
 	defer f.Close()
 
 	toolSet := map[string]struct{}{}
-	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 1<<20)
-	scanner.Buffer(buf, 1<<20)
+	scanner := newJSONLScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
