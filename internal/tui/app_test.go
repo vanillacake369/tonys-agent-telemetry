@@ -73,7 +73,7 @@ func TestApp_TabSwitchingRoundTrip(t *testing.T) {
 
 func TestApp_TabCyclingWithTabKey(t *testing.T) {
 	a := NewApp()
-	// Start at Sessions (0), Tab should advance forward.
+	// Start at Sessions (0), Tab should advance forward through all 5 tabs.
 	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyTab})
 	if a.activeTab != TabSkills {
 		t.Errorf("Tab from Sessions: activeTab = %d, want %d (TabSkills)", a.activeTab, TabSkills)
@@ -83,17 +83,25 @@ func TestApp_TabCyclingWithTabKey(t *testing.T) {
 		t.Errorf("Tab from Skills: activeTab = %d, want %d (TabCost)", a.activeTab, TabCost)
 	}
 	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyTab})
+	if a.activeTab != TabControl {
+		t.Errorf("Tab from Skills: activeTab = %d, want %d (TabControl)", a.activeTab, TabControl)
+	}
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyTab})
 	if a.activeTab != TabSessions {
-		t.Errorf("Tab from Cost (wrap): activeTab = %d, want %d (TabSessions)", a.activeTab, TabSessions)
+		t.Errorf("Tab from Control (wrap): activeTab = %d, want %d (TabSessions)", a.activeTab, TabSessions)
 	}
 }
 
 func TestApp_TabCyclingWithShiftTabKey(t *testing.T) {
 	a := NewApp()
-	// Start at Sessions (0), Shift+Tab should go backward (wrap to Cost).
+	// Start at Sessions (0), Shift+Tab should go backward (wrap to Control).
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if a.activeTab != TabControl {
+		t.Errorf("Shift+Tab from Sessions: activeTab = %d, want %d (TabControl)", a.activeTab, TabControl)
+	}
 	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyShiftTab})
 	if a.activeTab != TabCost {
-		t.Errorf("Shift+Tab from Sessions: activeTab = %d, want %d (TabCost)", a.activeTab, TabCost)
+		t.Errorf("Shift+Tab from Control: activeTab = %d, want %d (TabCost)", a.activeTab, TabCost)
 	}
 	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyShiftTab})
 	if a.activeTab != TabSkills {
@@ -191,9 +199,9 @@ func TestApp_ContentHeightMinimum(t *testing.T) {
 
 func TestApp_ViewContainsTabNames(t *testing.T) {
 	a := NewApp()
-	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 80, Height: 24})
+	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 120, Height: 24})
 	view := a.View()
-	for _, name := range []string{"Sessions", "Skills", "Cost"} {
+	for _, name := range []string{"Sessions", "Skills", "Cost", "Control"} {
 		if !strings.Contains(view, name) {
 			t.Errorf("View() missing tab name %q", name)
 		}
@@ -202,9 +210,9 @@ func TestApp_ViewContainsTabNames(t *testing.T) {
 
 func TestApp_ViewContainsNumberedTabPrefixes(t *testing.T) {
 	a := NewApp()
-	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 80, Height: 24})
+	a, _ = updateApp(t, a, tea.WindowSizeMsg{Width: 120, Height: 24})
 	view := a.View()
-	for _, prefix := range []string{"1:Sessions", "2:Skills", "3:Cost"} {
+	for _, prefix := range []string{"1:Sessions", "2:Skills", "3:Cost", "^G:Control"} {
 		if !strings.Contains(view, prefix) {
 			t.Errorf("View() missing numbered tab prefix %q", prefix)
 		}
