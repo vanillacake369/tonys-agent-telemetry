@@ -290,7 +290,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Route non-key messages to the specific tab that handles them.
-	// This avoids 3x state mutations per message (broadcast anti-pattern).
+	// CRITICAL: any tab whose Init() returns a load Cmd must have its
+	// load-response message type listed here, otherwise the message lands
+	// on whatever tab happens to be active (Sessions at startup) and gets
+	// dropped. The 'doesn't load until refresh' bug for Hooks/Control/DAG
+	// was exactly this — initial loads fired but the messages were silently
+	// discarded by the unrelated active tab.
 	switch msg.(type) {
 	case SessionsLoadedMsg, PreviewLoadedMsg, FileChangesLoadedMsg:
 		updated, cmd := a.tabs[TabSessions].Update(msg)
@@ -304,6 +309,18 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		skillsDebounceMsg, skillsGitHubDebounceMsg, AnalyzeExecuteMsg:
 		updated, cmd := a.tabs[TabSkills].Update(msg)
 		a.tabs[TabSkills] = updated
+		return a, cmd
+	case HooksLoadedMsg:
+		updated, cmd := a.tabs[TabHooks].Update(msg)
+		a.tabs[TabHooks] = updated
+		return a, cmd
+	case ControlRefreshMsg:
+		updated, cmd := a.tabs[TabControl].Update(msg)
+		a.tabs[TabControl] = updated
+		return a, cmd
+	case SpanCollectedMsg, SpanBatchMsg:
+		updated, cmd := a.tabs[TabDAG].Update(msg)
+		a.tabs[TabDAG] = updated
 		return a, cmd
 	default:
 		// Unknown messages go to active tab only.
