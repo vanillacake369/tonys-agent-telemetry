@@ -442,20 +442,27 @@ func (d *DAGTab) renderSpanView() string {
 		d.width, max(3, d.height), true)
 }
 
-// renderGraph draws the trace as a horizontal flow rather than a vertical
-// indented tree. Each parent's children fan out to its right with
-// box-drawing connectors; the selected node is highlighted.
+// renderGraph draws the trace as a true 2D DAG with box nodes connected
+// by L-shaped elbow connectors. Cols = depth, rows = pre-order traversal
+// position. The selected node is marked with a cursor arrow next to its
+// box.
+//
+// This replaces the previous nested-indent ASCII tree which users said
+// looked like a "nested bullet point list" rather than an n8n/airflow DAG.
 func (d *DAGTab) renderGraph(width int) string {
 	if len(d.flatNodes) == 0 {
 		return ""
 	}
-	cursorStyle := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
-	dimStyle := lipgloss.NewStyle().Foreground(colorDim)
-	doneStyle := lipgloss.NewStyle().Foreground(colorSuccess)
-	errStyle := lipgloss.NewStyle().Foreground(colorError)
-	runStyle := lipgloss.NewStyle().Foreground(colorWarning)
 
-	// Compute depth per node (longest path from any root).
+	// Layout: assign (col, row) to each node. col = depth, row = visit order.
+	// flatNodes is already in pre-order from flattenTrace, so we can use the
+	// index directly as the row.
+
+	// Compute depth per node (= longest path from any root).
+	idSet := map[string]bool{}
+	for _, n := range d.flatNodes {
+		idSet[n.Span.SpanID] = true
+	}
 	depthByID := map[string]int{}
 	var setDepth func(*telemetry.SpanNode, int)
 	setDepth = func(n *telemetry.SpanNode, depth int) {
@@ -469,51 +476,281 @@ func (d *DAGTab) renderGraph(width int) string {
 			setDepth(c, depth+1)
 		}
 	}
-	// Find roots in flatNodes (ParentSpanID empty or pointing outside).
-	idSet := map[string]bool{}
-	for _, n := range d.flatNodes {
-		idSet[n.Span.SpanID] = true
-	}
 	for _, n := range d.flatNodes {
 		if n.Span.ParentSpanID == "" || !idSet[n.Span.ParentSpanID] {
 			setDepth(n, 0)
 		}
 	}
 
-	var sb strings.Builder
+	positions := make([]gridPos, len(d.flatNodes))
+	posByID := make(map[string]int, len(d.flatNodes))
+	maxCol := 0
 	for i, n := range d.flatNodes {
-		depth := depthByID[n.Span.SpanID]
-		// Horizontal indent represents depth; arrows mark the connection.
-		indent := strings.Repeat("    ", depth)
-		var arrow string
-		if depth == 0 {
-			arrow = ""
-		} else {
-			arrow = dimStyle.Render("└─→ ")
+		positions[i] = gridPos{
+			col:  depthByID[n.Span.SpanID],
+			row:  i,
+			node: n,
 		}
-		label := nodeLabel(n.Span)
-		var styled string
-		switch n.Span.Status {
+		posByID[n.Span.SpanID] = i
+		if positions[i].col > maxCol {
+			maxCol = positions[i].col
+		}
+	}
+
+	const (
+		nodeW = 16 // chars per box including borders
+		nodeH = 3  // lines per box
+		hgap  = 6  // chars between columns (room for elbow)
+		vgap  = 1  // blank lines between rows
+	)
+	pitchX := nodeW + hgap
+	pitchY := nodeH + vgap
+
+	gridW := (maxCol+1)*pitchX - hgap
+	gridH := len(positions)*pitchY - vgap
+	if gridH < 1 {
+		gridH = 1
+	}
+
+	// Allocate a 2D rune grid. Cells default to space; box / connector
+	// drawing overwrites specific cells.
+	grid := make([][]rune, gridH)
+	for i := range grid {
+		grid[i] = make([]rune, gridW)
+		for j := range grid[i] {
+			grid[i][j] = ' '
+		}
+	}
+
+	// Draw boxes.
+	for _, p := range positions {
+		x := p.col * pitchX
+		y := p.row * pitchY
+		drawBox(grid, x, y, nodeW, nodeH, nodeLabel(p.node.Span))
+	}
+
+	// Draw connectors for each parent → child relation. We do one
+	// connector group per parent so a parent with multiple children gets
+	// a proper trunk with ┬ at the top and ├/└ at each branch off.
+	for _, p := range positions {
+		if len(p.node.Children) == 0 {
+			continue
+		}
+		// Filter to children we actually have positions for (handles
+		// cross-trace pointers if any slip through).
+		var kids []gridPos
+		for _, c := range p.node.Children {
+			if idx, ok := posByID[c.Span.SpanID]; ok {
+				kids = append(kids, positions[idx])
+			}
+		}
+		if len(kids) == 0 {
+			continue
+		}
+		drawConnectorGroup(grid, p, kids, nodeW, nodeH, pitchX, pitchY)
+	}
+
+	// Convert grid to string, applying colors per row. We can't easily
+	// color individual cells with lipgloss styles applied at conversion
+	// time, so per-line styling is the practical balance: the user gets
+	// readable graph + a cursor arrow on the selected row.
+	cursorStyle := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+	dimStyle := lipgloss.NewStyle().Foreground(colorDim)
+	errStyle := lipgloss.NewStyle().Foreground(colorError)
+	runStyle := lipgloss.NewStyle().Foreground(colorWarning)
+	doneStyle := lipgloss.NewStyle().Foreground(colorSuccess)
+
+	// Which lines belong to which node's box? For each node, three lines.
+	type rowColor struct{ start, end int; style lipgloss.Style }
+	colorRanges := []rowColor{}
+	for _, p := range positions {
+		y := p.row * pitchY
+		var style lipgloss.Style
+		switch p.node.Span.Status {
 		case "error":
-			styled = errStyle.Render(label)
+			style = errStyle
 		case "running":
-			styled = runStyle.Render(label)
+			style = runStyle
 		default:
-			styled = doneStyle.Render(label)
+			style = doneStyle
 		}
-		row := indent + arrow + styled
-		if i == d.nodeCursor {
-			row = cursorStyle.Render("▶ ") + row
+		colorRanges = append(colorRanges, rowColor{start: y, end: y + nodeH, style: style})
+	}
+
+	var sb strings.Builder
+	for y, row := range grid {
+		// Determine if this row is part of the selected node's box.
+		selectedRow := false
+		if d.nodeCursor < len(positions) {
+			sp := positions[d.nodeCursor]
+			boxYStart := sp.row * pitchY
+			if y >= boxYStart && y < boxYStart+nodeH {
+				selectedRow = true
+			}
+		}
+
+		line := string(row)
+		// Style: cursor arrow prefix on selected node's middle line.
+		if selectedRow {
+			line = cursorStyle.Render(line)
 		} else {
-			row = "  " + row
+			// Pick the style based on which node (if any) this row belongs to.
+			var styled bool
+			for _, cr := range colorRanges {
+				if y >= cr.start && y < cr.end {
+					line = cr.style.Render(line)
+					styled = true
+					break
+				}
+			}
+			if !styled {
+				// Pure connector row — dim styling.
+				line = dimStyle.Render(line)
+			}
 		}
-		// Hard width cap to avoid lipgloss wrapping.
-		if width > 0 && lipgloss.Width(row) > width {
-			row = lipgloss.NewStyle().MaxWidth(width).Render(row)
+
+		// Cursor marker for the selected node's middle row.
+		if selectedRow && d.nodeCursor < len(positions) {
+			sp := positions[d.nodeCursor]
+			midY := sp.row*pitchY + nodeH/2
+			if y == midY {
+				line = cursorStyle.Render("▶ ") + line
+			} else {
+				line = "  " + line
+			}
+		} else {
+			line = "  " + line
 		}
-		sb.WriteString(row + "\n")
+
+		sb.WriteString(line)
+		if y < len(grid)-1 {
+			sb.WriteString("\n")
+		}
 	}
 	return sb.String()
+}
+
+// drawBox writes a 3-row box border + label into the grid starting at (x, y).
+// Box layout:
+//
+//	┌──────────────┐
+//	│ <label>      │
+//	└──────────────┘
+func drawBox(grid [][]rune, x, y, w, h int, label string) {
+	if y+h > len(grid) || x+w > len(grid[0]) {
+		return
+	}
+	// Borders.
+	grid[y][x] = '┌'
+	grid[y][x+w-1] = '┐'
+	grid[y+h-1][x] = '└'
+	grid[y+h-1][x+w-1] = '┘'
+	for j := x + 1; j < x+w-1; j++ {
+		grid[y][j] = '─'
+		grid[y+h-1][j] = '─'
+	}
+	for i := y + 1; i < y+h-1; i++ {
+		grid[i][x] = '│'
+		grid[i][x+w-1] = '│'
+	}
+	// Label (one row at vertical centre).
+	labelY := y + h/2
+	labelRunes := []rune(" " + label)
+	max := w - 2
+	if len(labelRunes) > max {
+		labelRunes = append(labelRunes[:max-1], '…')
+	}
+	for i, r := range labelRunes {
+		grid[labelY][x+1+i] = r
+	}
+}
+
+// gridPos is the layout position of a node in the 2D graph grid.
+type gridPos struct {
+	col, row int
+	node     *telemetry.SpanNode
+}
+
+// childRow is the y-coordinate + col of a node, used internally by
+// drawConnectorGroup to sort children top-to-bottom for clean trunk routing.
+type childRow struct {
+	y, col int
+}
+
+// drawConnectorGroup draws a trunk from `parent`'s right edge that branches
+// to each child's left edge. The trunk uses ┬ at the top (parent row),
+// │ down the column, ├ at each non-last child branch, and └ at the last.
+// Each branch ends with → pointing into the child's left edge.
+func drawConnectorGroup(grid [][]rune, parent gridPos, kids []gridPos, nodeW, nodeH, pitchX, pitchY int) {
+	// Parent's right-edge midpoint.
+	pMidY := parent.row*pitchY + nodeH/2
+	pRightX := parent.col*pitchX + nodeW
+	if pRightX+1 >= len(grid[0]) {
+		return
+	}
+	// Trunk column = 2 chars right of parent.
+	trunkX := pRightX + 1
+
+	// Step right one ─ between parent and trunk.
+	if pMidY < len(grid) && pRightX < len(grid[0]) {
+		grid[pMidY][pRightX] = '─'
+	}
+
+	// Compute child Y positions and total trunk span.
+	var rows []childRow
+	for _, k := range kids {
+		rows = append(rows, childRow{y: k.row*pitchY + nodeH/2, col: k.col})
+	}
+	// Sort by y so the trunk is drawn linearly.
+	sortChildRows(rows)
+	lastY := rows[len(rows)-1].y
+
+	// Top of trunk on parent's row.
+	if len(rows) == 1 && rows[0].y == pMidY {
+		// Same row — flat arrow.
+		grid[pMidY][trunkX] = '─'
+	} else {
+		grid[pMidY][trunkX] = '┬'
+		// Vertical line down to last child.
+		for y := pMidY + 1; y <= lastY; y++ {
+			if y < len(grid) {
+				grid[y][trunkX] = '│'
+			}
+		}
+	}
+
+	// For each child: branch off the trunk at the child's row.
+	for i, cr := range rows {
+		ch := cr.y
+		if ch < len(grid) {
+			if i == len(rows)-1 {
+				grid[ch][trunkX] = '└'
+			} else if ch != pMidY {
+				grid[ch][trunkX] = '├'
+			}
+		}
+		// Horizontal from trunkX+1 to child's left edge - 1.
+		childLeftX := cr.col * pitchX
+		for x := trunkX + 1; x < childLeftX-1; x++ {
+			if x < len(grid[0]) && ch < len(grid) {
+				grid[ch][x] = '─'
+			}
+		}
+		if childLeftX-1 >= 0 && childLeftX-1 < len(grid[0]) && ch < len(grid) {
+			grid[ch][childLeftX-1] = '→'
+		}
+	}
+}
+
+// sortChildRows performs a tiny in-place sort by y ascending. Kept local
+// to avoid the sort import here (already imported elsewhere — but the
+// trivial implementation is clearer than wiring sort.Slice).
+func sortChildRows(rows []childRow) {
+	for i := 1; i < len(rows); i++ {
+		for j := i; j > 0 && rows[j-1].y > rows[j].y; j-- {
+			rows[j-1], rows[j] = rows[j], rows[j-1]
+		}
+	}
 }
 
 // renderSelectedSpanCompact shows the currently-selected span's key

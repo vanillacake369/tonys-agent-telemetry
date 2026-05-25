@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -24,7 +25,48 @@ import (
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/tui"
 )
 
+// version is set at build time via -ldflags "-X main.version=...".
+// When unset (e.g. `go install` or `go run` without ldflags), we fall back
+// to runtime build info so the binary still reports a meaningful identifier
+// instead of the literal string "dev".
 var version = "dev"
+
+// resolveVersion returns the effective version string, applying the
+// runtime/debug fallback when no ldflag was injected. Called once at
+// startup to avoid repeated work.
+func resolveVersion() string {
+	if version != "dev" {
+		return version
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "dev"
+	}
+	// Released versions: info.Main.Version is "v1.2.3"-shaped.
+	if info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	// Source-built: fall back to VCS revision (short SHA).
+	var rev, modified string
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.modified":
+			modified = s.Value
+		}
+	}
+	if rev == "" {
+		return "dev"
+	}
+	if len(rev) > 7 {
+		rev = rev[:7]
+	}
+	if modified == "true" {
+		rev += "-dirty"
+	}
+	return rev
+}
 
 func main() {
 	// Phase 4 CLI flags. Defined via flag package; parse only when no
@@ -39,7 +81,7 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "--version", "-v":
-			fmt.Printf("tonys-agent-telemetry %s\n", version)
+			fmt.Printf("tonys-agent-telemetry %s\n", resolveVersion())
 			return
 		case "--help", "-h":
 			printUsage()
