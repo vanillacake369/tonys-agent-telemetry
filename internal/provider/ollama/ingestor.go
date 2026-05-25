@@ -65,13 +65,16 @@ func (i *Ingestor) Detect(ctx context.Context) bool {
 	if resp.StatusCode != 200 {
 		return false
 	}
+	// Use a pointer so we can distinguish "missing key" (nil) from "empty
+	// array" (non-nil with len 0). Non-Ollama JSON servers that return 200
+	// won't have a "models" field at all.
 	var probe struct {
-		Models []json.RawMessage `json:"models"`
+		Models *[]json.RawMessage `json:"models"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&probe); err != nil {
 		return false
 	}
-	return true
+	return probe.Models != nil
 }
 
 // Ingest polls /api/ps until ctx is cancelled. Emits one Span the first
