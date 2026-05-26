@@ -1,5 +1,7 @@
 version: 2
 
+project_name: tonys-agent-telemetry
+
 builds:
   - id: main
     main: .
@@ -11,15 +13,69 @@ builds:
     ldflags:
       - -s -w
       - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
 
 archives:
   - id: default
     ids: [main]
     formats: [tar.gz]
     name_template: "tonys-agent-telemetry_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE*
+      - README.md
 
 checksum:
   name_template: "checksums.txt"
+
+# Linux package targets (deb + rpm + apk). Distributors who want to
+# pull via apt/dnf/apk can grab these from each GitHub release.
+nfpms:
+  - id: linux-packages
+    ids: [main]
+    package_name: tonys-agent-telemetry
+    vendor: vanillacake369
+    homepage: https://github.com/vanillacake369/tonys-agent-telemetry
+    maintainer: vanillacake369 <vanillacake369@users.noreply.github.com>
+    description: |-
+      Local-first control plane for LLM agents.
+      Multi-provider telemetry TUI with Swarm DAG visualization,
+      evidence-backed skill recommendations, and longitudinal trends.
+    license: MIT
+    formats: [deb, rpm, apk]
+    bindir: /usr/bin
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/tonys-agent-telemetry/README.md
+      - src: LICENSE
+        dst: /usr/share/doc/tonys-agent-telemetry/LICENSE
+        file_info:
+          mode: 0644
+
+# Homebrew formula — published to a separate tap repo on each release.
+# Requires the tap repo to exist: vanillacake369/homebrew-tap. Disabled
+# automatically on snapshot builds via the {{ if not .IsSnapshot }}.
+brews:
+  - name: tonys-agent-telemetry
+    ids: [default]
+    repository:
+      owner: vanillacake369
+      name: homebrew-tap
+      branch: main
+    directory: Formula
+    description: "Local-first multi-provider LLM agent telemetry TUI"
+    homepage: "https://github.com/vanillacake369/tonys-agent-telemetry"
+    license: "MIT"
+    skip_upload: auto
+    test: |
+      system "#{bin}/tonys-agent-telemetry", "--version"
+    install: |
+      bin.install "tonys-agent-telemetry"
+
+# SBOMs for supply-chain transparency. Anchore syft is the default.
+sboms:
+  - id: archive
+    artifacts: archive
 
 changelog:
   use: github
@@ -29,3 +85,21 @@ changelog:
       - "^docs:"
       - "^test:"
       - "^chore:"
+  groups:
+    - title: Features
+      regexp: "^feat[(:]"
+      order: 0
+    - title: Bug fixes
+      regexp: "^fix[(:]"
+      order: 1
+    - title: Refactors
+      regexp: "^refactor[(:]"
+      order: 2
+
+release:
+  github:
+    owner: vanillacake369
+    name: tonys-agent-telemetry
+  prerelease: auto
+  mode: replace
+  draft: false
