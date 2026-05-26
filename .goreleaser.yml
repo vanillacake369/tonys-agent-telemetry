@@ -64,16 +64,16 @@ brews:
       branch: main
       # External-repo push requires a PAT with `repo` scope on the tap
       # repo — the default GITHUB_TOKEN cannot write outside this repo.
-      # If HOMEBREW_TAP_GITHUB_TOKEN is unset, skip_upload turns true
+      # If HOMEBREW_TAP_TOKEN is unset, skip_upload turns true
       # via the template below and goreleaser only produces the formula
       # file locally (dist/homebrew/Formula/...) so a maintainer can
       # copy it over manually.
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Formula
     description: "Local-first multi-provider LLM agent telemetry TUI"
     homepage: "https://github.com/vanillacake369/tonys-agent-telemetry"
     license: "MIT"
-    skip_upload: '{{ if eq .Env.HOMEBREW_TAP_GITHUB_TOKEN "" }}true{{ end }}'
+    skip_upload: '{{ if eq .Env.HOMEBREW_TAP_TOKEN "" }}true{{ end }}'
     test: |
       system "#{bin}/tonys-agent-telemetry", "--version"
     install: |
