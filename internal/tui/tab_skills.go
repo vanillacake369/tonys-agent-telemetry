@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -708,7 +709,7 @@ func (t SkillsTab) renderCatalogSection(width int) string {
 	}
 
 	n := len(t.catalogItems)
-	minViable := catalog.ResolveMinViable("")
+	minViable := catalog.ResolveMinViable(os.Getenv("TONYS_CATALOG_MIN"))
 
 	// Below-minimum warning: show partial warning, no item list.
 	if n < minViable {
