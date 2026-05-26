@@ -10,7 +10,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/event"
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/signal"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/signalstore"
+	"github.com/vanillacake369/tonys-agent-telemetry/internal/telemetry"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/trends"
 )
 
@@ -493,23 +495,43 @@ func (a App) propagateSize() App {
 	return a
 }
 
-// loadTrendsCmd returns a tea.Cmd that reads the signal store, aggregates
-// the last DefaultLookbackDays of buckets, and sends TrendsLoadedMsg.
-// If the store was not initialised (persistence unavailable), it returns an
-// empty TrendsLoadedMsg so the tab renders its "not enough data" empty state.
+// loadTrendsCmd returns a tea.Cmd that reads the signal store, folds in live
+// span data from the DAG tab, aggregates the last DefaultLookbackDays of
+// buckets, and sends TrendsLoadedMsg.
+//
+// The live path ensures users with historical sessions see data immediately
+// on first open of the Trends tab, before the 5-minute TrendsFlushTickMsg
+// has fired. Persisted snapshots and live-derived snapshots are merged before
+// aggregation so neither source is preferred over the other.
 func (a App) loadTrendsCmd() tea.Cmd {
+	// Capture span snapshot here on the main goroutine (safe: value copy).
+	var liveSpans []telemetry.Span
+	if dagTab, ok := a.tabs[TabDAG].(SpanProvider); ok {
+		spans := dagTab.Spans()
+		liveSpans = make([]telemetry.Span, len(spans))
+		copy(liveSpans, spans)
+	}
 	store := a.trendsPersistenceStore()
 	return func() tea.Msg {
-		if store == nil {
-			return TrendsLoadedMsg{Buckets: nil}
-		}
 		to := trends.RoundedNow()
 		from := to.Add(-time.Duration(trends.DefaultLookbackDays) * 24 * time.Hour)
-		sessions, err := store.LoadRange(from, to)
-		if err != nil {
-			return TrendsLoadedMsg{Buckets: nil}
+
+		// 1. Persisted snapshots from the store.
+		var persisted []signalstore.SessionSnapshot
+		if store != nil {
+			var err error
+			persisted, err = store.LoadRange(from, to)
+			if err != nil {
+				persisted = nil
+			}
 		}
-		buckets := trends.Aggregate(sessions, from, to, trends.DefaultBucketDuration)
+
+		// 2. Live snapshots from the current span buffer.
+		live := trends.BuildLiveSnapshots(liveSpans, signal.DefaultExtractOpts())
+
+		// 3. Merge + aggregate.
+		all := append(persisted, live...)
+		buckets := trends.Aggregate(all, from, to, trends.DefaultBucketDuration)
 		return TrendsLoadedMsg{Buckets: buckets}
 	}
 }
