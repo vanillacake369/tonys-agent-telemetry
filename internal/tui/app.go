@@ -100,6 +100,14 @@ type App struct {
 	// trendsPersistence drives the periodic signal extraction and persistence
 	// to the signal store. Ticked by TrendsFlushTickMsg every FlushInterval.
 	trendsPersistence *TrendsPersistence
+
+	// sessionID is the project-scoped identifier used when persisting signals.
+	// Derived from the working directory at App construction via ResolveSessionID().
+	sessionID string
+
+	// forestCache is shared by the advisor and trends pipelines so BuildForests
+	// + Extract are called at most once per span-buffer generation.
+	forestCache *ForestCache
 }
 
 const (
@@ -141,6 +149,8 @@ func NewApp() App {
 		searchFocused:     false,
 		advisor:           NewAdvisorPipeline(),
 		trendsPersistence: persistence,
+		sessionID:         ResolveSessionID(),
+		forestCache:       NewForestCache(),
 	}
 }
 
@@ -382,7 +392,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		dagTab := a.tabs[TabDAG].(SpanProvider)
 		skillsTab := a.tabs[TabSkills].(SkillsTab)
 		installedNames := skillsTab.LocalSkillNames()
-		if advisorCmd := a.advisor.MaybeRun(dagTab.Spans(), skillsTab.CatalogItems(), installedNames); advisorCmd != nil {
+		if advisorCmd := a.advisor.MaybeRun(dagTab.Spans(), skillsTab.CatalogItems(), installedNames, a.forestCache); advisorCmd != nil {
 			return a, tea.Batch(cmd, advisorCmd)
 		}
 		return a, cmd
@@ -400,7 +410,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmds []tea.Cmd
 		if a.trendsPersistence != nil {
 			dagTab := a.tabs[TabDAG].(SpanProvider)
-			if flushCmd := a.trendsPersistence.FlushCmd(tuiSessionID, dagTab.Spans()); flushCmd != nil {
+			if flushCmd := a.trendsPersistence.FlushCmd(a.sessionID, dagTab.Spans(), a.forestCache); flushCmd != nil {
 				cmds = append(cmds, flushCmd)
 			}
 			cmds = append(cmds, a.trendsPersistence.NextTick())
@@ -482,12 +492,6 @@ func (a App) propagateSize() App {
 	}
 	return a
 }
-
-// tuiSessionID is the fixed session identifier used when persisting signals
-// from the running TUI process. A single TUI instance uses one session ID so
-// that buckets accumulate day-over-day in the same file. Per-project IDs are
-// a Phase 4 follow-up (requires deriving ID from the active project path).
-const tuiSessionID = "tui-session"
 
 // loadTrendsCmd returns a tea.Cmd that reads the signal store, aggregates
 // the last DefaultLookbackDays of buckets, and sends TrendsLoadedMsg.
