@@ -30,11 +30,10 @@ jobs:
       - name: Fetch origin/main for lint baseline
         run: git fetch --no-tags --depth=50 origin main
       - name: golangci-lint (new-only)
-        uses: golangci/golangci-lint-action@v6
+        # v7 of the action is required to install golangci-lint v2 binaries
+        # (v6 only knows about v1 release tags and explicitly rejects v2.x).
+        uses: golangci/golangci-lint-action@v7
         with:
-          # Pin to a v2 binary explicitly — the action's "latest" still
-          # serves v1 by default, and v1 cannot parse our .golangci.yml
-          # (which uses the v2 schema).
           version: v2.12.2
           args: --timeout 5m --new-from-rev=origin/main
 
