@@ -1,4 +1,4 @@
-.PHONY: build test test-race vet lint lint-strict fmt fmt-check hooks-install clean install ci release-dry help
+.PHONY: build test test-race vet lint lint-strict fmt fmt-check hooks-install clean install ci release-dry demo demo-one help
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
@@ -25,6 +25,8 @@ help:
 	@echo "  install       go install the binary to GOPATH/bin"
 	@echo "  clean         Remove bin/, dist/, result"
 	@echo "  release-dry   GoReleaser snapshot build"
+	@echo "  demo          Regenerate every README GIF (needs vhs)"
+	@echo "  demo-one      Regenerate one GIF: TAPE=scripts/demo/<file>.tape"
 	@echo ""
 	@echo "VERSION=$(VERSION)"
 
@@ -94,3 +96,22 @@ release-dry:
 	@# Skip sbom (needs syft) and sign (needs cosign + OIDC) for local
 	@# dry-runs. CI installs both via the workflow.
 	goreleaser release --snapshot --clean --skip=sbom,sign,publish
+
+# Regenerate every README demo GIF from the .tape scripts. Requires:
+#   brew install vhs ttyd ffmpeg
+# Output: docs/demo/<scenario>.gif (one per .tape file).
+demo: build
+	@if ! command -v vhs > /dev/null 2>&1; then \
+		echo "vhs not installed — see docs/DEMO_RECORDING_GUIDE.md"; \
+		exit 1; \
+	fi
+	@for tape in scripts/demo/*.tape; do \
+		echo "→ $$tape"; \
+		vhs $$tape; \
+	done
+	@echo "Wrote: docs/demo/*.gif"
+
+# Regenerate a single demo GIF: make demo-one TAPE=scripts/demo/dag-flow.tape
+demo-one: build
+	@if [ -z "$(TAPE)" ]; then echo "usage: make demo-one TAPE=scripts/demo/<file>.tape"; exit 2; fi
+	vhs $(TAPE)

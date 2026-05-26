@@ -6,7 +6,25 @@ TUI dashboard for Claude Code sessions, agents, DAG visualization, and skill mar
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macOS-lightgrey)
 
-<!-- TODO: add terminal screenshot -->
+## Demo
+
+<p align="center">
+  <img src="docs/demo/quickstart.gif" alt="Launch + 7-tab tour" width="720" />
+</p>
+
+<details>
+<summary>📺 More recordings — DAG · Advisor · Trends · CLI</summary>
+
+| Feature | Recording |
+|---|---|
+| **DAG** — traces list → graph view → `g` overview → `/bash` search → `n`/`N` cycle | <img src="docs/demo/dag-flow.gif" alt="DAG flow" width="720" /> |
+| **Advisor** — Skills tab catalog loads + Advisor pane populates with evidence-backed recommendations (SignalID + TraceID citations) | <img src="docs/demo/advisor-flow.gif" alt="Advisor flow" width="720" /> |
+| **Trends** — longitudinal sparklines + Start/Last/Δ vs avg + per-provider fidelity tier legend | <img src="docs/demo/trends-flow.gif" alt="Trends" width="720" /> |
+| **CLI** — `--emit-signals --replay <file> \| jq` for headless analysis | <img src="docs/demo/cli-emit-signals.gif" alt="CLI signals" width="720" /> |
+
+Regenerate any of these with `make demo` (or `make demo-one TAPE=scripts/demo/<file>.tape`).
+Contributor workflow: [`docs/DEMO_RECORDING_GUIDE.md`](docs/DEMO_RECORDING_GUIDE.md).
+</details>
 
 ## Features
 
