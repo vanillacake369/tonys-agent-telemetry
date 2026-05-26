@@ -245,6 +245,15 @@ func TestDuplicateWork_Performance_K50_M50(t *testing.T) {
 	forest := signal.Forest{"trace-perf": {parent}}
 	opts := signal.DefaultExtractOpts()
 
+	// The race detector adds 2-10× wall-clock overhead, which inflates the
+	// timing well past any meaningful budget. Skip the perf assertion under
+	// -race; the bench (BenchmarkDuplicateWork_K50_M50) covers the
+	// without-race case authoritatively. isRaceEnabled is build-tag-paired
+	// (race_on_test.go / race_off_test.go).
+	if isRaceEnabled() {
+		t.Skip("perf budget validation skipped under -race; see BenchmarkDuplicateWork_K50_M50")
+	}
+
 	start := time.Now()
 	_ = signal.Extract(forest, opts)
 	elapsed := time.Since(start)

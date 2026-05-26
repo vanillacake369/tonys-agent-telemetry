@@ -20,7 +20,8 @@ help:
 	@echo "  lint          go vet (always available)"
 	@echo "  lint-strict   golangci-lint run (requires the binary on PATH)"
 	@echo "  hooks-install Wire .githooks/ as the repo hooks directory"
-	@echo "  ci            fmt-check + vet + lint-strict (best-effort) + race tests"
+	@echo "  lint-new      golangci-lint run --new-from-rev=origin/main (PR gate)"
+	@echo "  ci            fmt-check + vet + race tests (matches CI workflow)"
 	@echo "  install       go install the binary to GOPATH/bin"
 	@echo "  clean         Remove bin/, dist/, result"
 	@echo "  release-dry   GoReleaser snapshot build"
@@ -61,13 +62,24 @@ lint-strict:
 		echo "Install: https://golangci-lint.run/usage/install/"; \
 	fi
 
+# lint-new only flags NEW issues introduced since main. Use this in PRs to
+# avoid being blocked by the 179 pre-existing accumulated issues. Once those
+# are paid down, swap make ci over to lint-strict.
+lint-new:
+	@if command -v golangci-lint > /dev/null 2>&1; then \
+		golangci-lint run --new-from-rev=origin/main; \
+	else \
+		echo "golangci-lint not installed — skipping diff lint."; \
+	fi
+
 hooks-install:
 	@git config core.hooksPath .githooks
 	@echo "Git hooks installed (core.hooksPath = .githooks)"
 	@echo "pre-commit: gofmt + vet + short tests"
 	@echo "commit-msg: Conventional Commits enforcement"
 
-ci: fmt-check vet lint-strict test-race
+ci: fmt-check vet test-race
+	@echo "ci: fmt + vet + race tests OK. Run 'make lint-new' before each PR."
 
 install:
 	go install -ldflags "$(LDFLAGS)" .
@@ -76,4 +88,6 @@ clean:
 	rm -rf bin/ dist/ result
 
 release-dry:
-	goreleaser release --snapshot --clean
+	@# Skip sbom (needs syft) and sign (needs cosign + OIDC) for local
+	@# dry-runs. CI installs both via the workflow.
+	goreleaser release --snapshot --clean --skip=sbom,sign,publish

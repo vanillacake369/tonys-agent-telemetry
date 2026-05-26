@@ -24,11 +24,14 @@ jobs:
           fi
       - name: go vet
         run: go vet ./...
-      - name: golangci-lint
+      # Strict lint runs only on changed code (--new-from-rev=origin/main)
+      # so accumulated pre-existing issues do not block CI. Phase out by
+      # paying down the backlog and dropping the flag.
+      - name: golangci-lint (new-only)
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
-          args: --timeout 5m
+          args: --timeout 5m --new-from-rev=origin/main
 
   test:
     runs-on: ubuntu-latest

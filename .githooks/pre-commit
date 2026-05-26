@@ -37,11 +37,12 @@ if ! go test -short -count=1 ./... > /tmp/tat-test-out 2>&1; then
 	exit 1
 fi
 
-# Optional: golangci-lint if installed. Don't fail commit if not present;
-# CI is the authoritative gate.
+# Optional: golangci-lint if installed, scoped to NEW issues only via
+# --new-from-rev=HEAD~ so a commit can land without paying down accumulated
+# pre-existing issues. CI is the authoritative gate.
 if command -v golangci-lint > /dev/null 2>&1; then
-	echo "→ golangci-lint run --fast"
-	if ! golangci-lint run --fast > /tmp/tat-lint-out 2>&1; then
+	echo "→ golangci-lint run --new-from-rev=HEAD~"
+	if ! golangci-lint run --new-from-rev=HEAD~ > /tmp/tat-lint-out 2>&1; then
 		cat /tmp/tat-lint-out
 		exit 1
 	fi

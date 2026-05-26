@@ -160,8 +160,15 @@ func (h HooksTab) View() string {
 		return renderErrorState(h.err, h.width)
 	}
 
+	// Render the full dashboard inline. The earlier viewport-backed render
+	// silently clipped sections below the visible window (StatusLine + the
+	// last events disappeared at 40-row tests), which is the wrong default
+	// for a tab whose entire purpose is to show the user every configured
+	// hook. The viewport.Update wiring stays in case interactive scrolling
+	// is reintroduced later; for now h.viewport is non-authoritative.
+	contentW := max(40, h.width-4)
 	panelH := max(3, h.height)
-	return RenderPanel("Hooks & Harness", h.viewport.View(), h.width, panelH, true)
+	return RenderPanel("Hooks & Harness", h.renderDashboard(contentW), h.width, panelH, true)
 }
 
 // refreshViewport rebuilds the scrollable dashboard content.
