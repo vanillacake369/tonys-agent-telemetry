@@ -62,12 +62,15 @@ lint-strict:
 		echo "Install: https://golangci-lint.run/usage/install/"; \
 	fi
 
-# lint-new only flags NEW issues introduced since main. Use this in PRs to
-# avoid being blocked by the 179 pre-existing accumulated issues. Once those
-# are paid down, swap make ci over to lint-strict.
+# lint-new only flags NEW issues introduced since LINT_BASE (default HEAD~,
+# i.e. the parent commit). CI overrides this to origin/main so PRs are
+# checked against the merge base. Locally, HEAD~ keeps runs fast and
+# meaningful — only the most recent commit's diff is audited.
+LINT_BASE ?= HEAD~
 lint-new:
 	@if command -v golangci-lint > /dev/null 2>&1; then \
-		golangci-lint run --new-from-rev=origin/main; \
+		echo "→ golangci-lint run --new-from-rev=$(LINT_BASE)"; \
+		golangci-lint run --new-from-rev=$(LINT_BASE); \
 	else \
 		echo "golangci-lint not installed — skipping diff lint."; \
 	fi

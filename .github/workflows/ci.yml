@@ -25,8 +25,10 @@ jobs:
       - name: go vet
         run: go vet ./...
       # Strict lint runs only on changed code (--new-from-rev=origin/main)
-      # so accumulated pre-existing issues do not block CI. Phase out by
-      # paying down the backlog and dropping the flag.
+      # so accumulated pre-existing issues do not block CI. Pre-fetch the
+      # main ref so the diff comparison is meaningful on shallow checkouts.
+      - name: Fetch origin/main for lint baseline
+        run: git fetch --no-tags --depth=50 origin main
       - name: golangci-lint (new-only)
         uses: golangci/golangci-lint-action@v6
         with:
