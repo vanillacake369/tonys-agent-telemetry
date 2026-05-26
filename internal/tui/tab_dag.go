@@ -32,6 +32,8 @@ type SpanBatchMsg struct {
 //
 //	traces  → graph    → span detail
 //	(list)    (select)   (full attrs)
+//	           ↕ g
+//	         overview   (compact one-line-per-span tree)
 //
 // Inspired by k9s's master-detail navigation pattern.
 type dagViewMode int
@@ -40,6 +42,7 @@ const (
 	dagViewTraces dagViewMode = iota
 	dagViewGraph
 	dagViewSpan
+	dagViewOverview // compact tree; g toggles between graph and overview
 )
 
 // DAGTab visualizes collected Spans as a navigable graph rather than the
@@ -66,6 +69,10 @@ type DAGTab struct {
 	// the UI thread for hundreds of ms.
 	graphCache    string
 	graphCacheKey string
+
+	// overview mode state (mode=dagViewOverview)
+	overviewLines  []overviewLine // pre-rendered per-line metadata
+	overviewCursor int            // selected line index in overview
 
 	// in-graph search state (mode=dagViewGraph)
 	dagSearchInputting bool   // true while user is typing the search query
@@ -126,6 +133,8 @@ func (d *DAGTab) handleKey(msg tea.KeyMsg) (TabModel, tea.Cmd) {
 		return d.handleKeyGraph(msg)
 	case dagViewSpan:
 		return d.handleKeySpan(msg)
+	case dagViewOverview:
+		return d.handleKeyOverview(msg)
 	}
 	return d, nil
 }
@@ -265,6 +274,11 @@ func (d *DAGTab) handleKeyGraph(msg tea.KeyMsg) (TabModel, tea.Cmd) {
 		if len(d.flatNodes) > 0 {
 			return d, d.editCmd(d.flatNodes[d.nodeCursor].Span)
 		}
+	case "g":
+		// Toggle compact overview mode.
+		d.overviewLines = buildOverviewLines(d.flatNodes)
+		d.overviewCursor = 0
+		d.mode = dagViewOverview
 	case "r":
 		// Failsafe: clear the render cache so the next View() recomputes.
 		// Useful if a terminal-multiplexer pane resize was missed.
@@ -479,6 +493,8 @@ func (d *DAGTab) View() string {
 		return d.renderGraphView()
 	case dagViewSpan:
 		return d.renderSpanView()
+	case dagViewOverview:
+		return d.renderOverviewView()
 	}
 	return ""
 }
@@ -490,6 +506,13 @@ func (d *DAGTab) renderTracesView() string {
 	dimStyle := lipgloss.NewStyle().Foreground(colorDim)
 
 	var sb strings.Builder
+
+	// Help banner — always visible so users know the available actions.
+	sb.WriteString(d.renderHelp([]helpKey{
+		{"Enter", "open trace"}, {"/", "search"}, {"6", "trends"}, {"5", "this tab"},
+	}))
+	sb.WriteString("\n")
+
 	// Column layout (80-col safe):
 	// #(4) STATUS(9) PRV(4) TRACE(24) SPANS(7) DEPTH(7) LAST(8)  ≈ 63 + cursor(2)
 	sb.WriteString(headerStyle.Render(fmt.Sprintf("%-4s %-9s %-3s %-24s %-7s %-7s %s",
@@ -569,9 +592,13 @@ func (d *DAGTab) renderGraphView() string {
 
 	graph := d.renderGraph(contentBudget)
 
-	searchKeys := []helpKey{{"j/k", "select"}, {"enter/l", "detail"}, {"y", "yank"},
-		{"e", "edit"}, {"/", "search"}, {"n/N", "next/prev"}, {"r", "redraw"}, {"esc/h", "back"}}
-	help := d.renderHelp(searchKeys)
+	// Help banner: include g:overview so users discover the new mode.
+	searchKeys := []helpKey{{"j/k", "select"}, {"enter/l", "detail"}, {"g", "overview"},
+		{"y", "yank"}, {"e", "edit"}, {"/", "search"}, {"n/N", "next/prev match"},
+		{"Esc", "back to list"}}
+	graphViewBanner := lipgloss.NewStyle().Foreground(colorDim).Render(
+		"Graph view · g: overview · /: search match · n/N: next/prev match · Esc: back to list")
+	help := graphViewBanner + "\n" + d.renderHelp(searchKeys)
 
 	searchBar := d.renderDAGSearchBar(contentBudget)
 	body := header + "\n\n" + graph + "\n\n" + help + searchBar + d.renderFlash()
@@ -1257,21 +1284,27 @@ func (d *DAGTab) renderHelp(keys []helpKey) string {
 
 // renderDAGSearchBar renders the "/" search prompt + active query info
 // at the bottom of the graph view.
+//
+// Three states:
+//   - Typing:          /<buf>_
+//   - Confirmed/match: /<query>  match X of Y  (n/N navigate · Esc clear)
+//   - Confirmed/empty: /<query>  no matches  (Esc clear)
 func (d *DAGTab) renderDAGSearchBar(width int) string {
 	if d.dagSearchInputting {
 		prompt := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).Render("/")
-		cursor := lipgloss.NewStyle().Foreground(colorPrimary).Render("█")
+		cursor := lipgloss.NewStyle().Foreground(colorPrimary).Render("_")
 		return "\n" + prompt + d.dagSearchBuf + cursor
 	}
 	if d.dagSearchActive && d.dagSearchQuery != "" {
-		matchInfo := ""
-		if len(d.dagSearchMatches) > 0 {
-			matchInfo = fmt.Sprintf("  %d/%d matches", d.dagSearchIdx+1, len(d.dagSearchMatches))
-		} else {
-			matchInfo = "  (no matches)"
-		}
 		style := lipgloss.NewStyle().Foreground(colorStatusInfo)
-		return "\n" + style.Render(fmt.Sprintf("search: %q%s  (n/N navigate, Esc clear)", d.dagSearchQuery, matchInfo))
+		var bar string
+		if len(d.dagSearchMatches) > 0 {
+			bar = fmt.Sprintf("/%s  match %d of %d  (n/N navigate · Esc clear)",
+				d.dagSearchQuery, d.dagSearchIdx+1, len(d.dagSearchMatches))
+		} else {
+			bar = fmt.Sprintf("/%s  no matches  (Esc clear)", d.dagSearchQuery)
+		}
+		return "\n" + style.Render(bar)
 	}
 	return ""
 }
