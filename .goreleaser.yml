@@ -77,6 +77,31 @@ sboms:
   - id: archive
     artifacts: archive
 
+# Cosign keyless signing (sigstore/Fulcio via the GH Actions OIDC token).
+# Each archive, deb/rpm/apk package, checksums file, and SBOM is signed,
+# producing a .sig (signature) + .pem (cert) sidecar attached to the
+# release. Verify post-download with:
+#
+#   cosign verify-blob \
+#     --certificate tonys-agent-telemetry_linux_amd64.tar.gz.pem \
+#     --signature   tonys-agent-telemetry_linux_amd64.tar.gz.sig \
+#     --certificate-identity-regexp '^https://github\.com/vanillacake369/tonys-agent-telemetry/' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     tonys-agent-telemetry_linux_amd64.tar.gz
+signs:
+  - id: cosign-keyless
+    cmd: cosign
+    args:
+      - sign-blob
+      - --yes
+      - --output-certificate=${certificate}
+      - --output-signature=${signature}
+      - ${artifact}
+    signature: ${artifact}.sig
+    certificate: ${artifact}.pem
+    artifacts: all
+    output: true
+
 changelog:
   use: github
   sort: asc

@@ -6,21 +6,78 @@ on:
       - 'v*'
 
 permissions:
-  contents: write
+  contents: write    # upload release assets
+  id-token: write    # OIDC token for cosign keyless + SLSA
+  packages: write    # ghcr (currently unused; reserved for future Docker)
 
 jobs:
-  release:
+  goreleaser:
     runs-on: ubuntu-latest
+    outputs:
+      # Hashes of release artefacts (the checksums.txt file, base64-encoded)
+      # consumed by the SLSA generator job below to produce a verifiable
+      # provenance attestation covering every signed artefact.
+      hashes: ${{ steps.hashes.outputs.hashes }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23'
+
+      # Cosign for keyless signing (signs: block in .goreleaser.yml).
+      - uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.4.1'
+
+      # Syft for SBOM generation (sboms: block in .goreleaser.yml).
+      - uses: anchore/sbom-action/download-syft@v0
+
       - uses: goreleaser/goreleaser-action@v6
+        id: run-goreleaser
         with:
           version: latest
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # COSIGN_EXPERIMENTAL is not strictly required on cosign v2
+          # keyless, but documents the OIDC-driven signing path explicitly.
+          COSIGN_EXPERIMENTAL: '1'
+
+      # Base64-encoded SHA-256 hashes of release artefacts so the SLSA
+      # generator can sign them into a single in-toto attestation.
+      - name: Compute artefact hashes for SLSA provenance
+        id: hashes
+        env:
+          ARTIFACTS: ${{ steps.run-goreleaser.outputs.artifacts }}
+        run: |
+          set -euo pipefail
+          checksum_file=$(echo "$ARTIFACTS" | jq -r '.[] | select (.type=="Checksum") | .path' | head -1)
+          if [ -z "$checksum_file" ] || [ ! -f "$checksum_file" ]; then
+            echo "::error::no checksums.txt artefact produced by goreleaser"
+            exit 1
+          fi
+          hashes_b64=$(base64 -w0 < "$checksum_file")
+          echo "hashes=$hashes_b64" >> "$GITHUB_OUTPUT"
+
+  # SLSA L3 binary provenance generator. Produces a signed in-toto
+  # attestation listing every release artefact + its source commit +
+  # the workflow that built it. Verifiable via:
+  #
+  #   slsa-verifier verify-artifact \
+  #     --provenance-path tonys-agent-telemetry.intoto.jsonl \
+  #     --source-uri github.com/vanillacake369/tonys-agent-telemetry \
+  #     <artefact>
+  provenance:
+    needs: [goreleaser]
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.0.0
+    with:
+      base64-subjects: ${{ needs.goreleaser.outputs.hashes }}
+      provenance-name: tonys-agent-telemetry.intoto.jsonl
+      upload-assets: true
