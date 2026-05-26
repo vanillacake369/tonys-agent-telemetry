@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -10,25 +11,49 @@ import (
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/telemetry"
 )
 
-// TestVisualSmoke_AllTabsWithRealData drives the App with synthetic spans
-// that look like a real Claude Code session, then dumps every tab's View()
-// so a human can scan for layout breakage. Useful when the binary cannot
-// be launched interactively (no TTY).
+// TestVisualSmoke_AllTabsWithRealData drives the App with realistic spans
+// across MULTIPLE common terminal sizes (80x24, 100x30, 120x40) so the
+// "looks fine at one size, broken at another" class of bug — including
+// tab-bar-pushed-off-the-top when content overflows — is caught here.
+//
+// Hard assertion: the tab bar must be on the SECOND visible line of the
+// rendered output (line 0 = outer border top, line 1 = tab bar). If any
+// content lower in the View pushes the layout taller than `height`, the
+// rendered output will exceed `height` rows and the user's terminal will
+// crop the top — pushing the tab bar off-screen. This test catches that
+// by asserting the total rendered row count is <= height.
 func TestVisualSmoke_AllTabsWithRealData(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping visual smoke in -short mode")
 	}
 
-	var m tea.Model = NewApp()
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	sizes := []struct {
+		name string
+		w, h int
+	}{
+		{"narrow-80x24", 80, 24},
+		{"common-100x30", 100, 30},
+		{"wide-120x40", 120, 40},
+	}
 
-	// Multi-day synthetic spans so Trends buckets actually populate
-	// (DefaultBucketDuration=24h, MinBucketsForDisplay=2).
+	for _, sz := range sizes {
+		t.Run(sz.name, func(t *testing.T) {
+			runSmoke(t, sz.w, sz.h)
+		})
+	}
+}
+
+func runSmoke(t *testing.T, width, height int) {
+	t.Helper()
+
+	var m tea.Model = NewApp()
+	m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: height})
+
+	// Multi-day synthetic spans so Trends populates with real sparklines.
 	now := time.Now()
 	dayAgo := now.Add(-24 * time.Hour)
 	twoDayAgo := now.Add(-48 * time.Hour)
 	spans := []telemetry.Span{
-		// Trace from 2 days ago — produces a stalled_node bucket.
 		{TraceID: "t-d2", SpanID: "d2-root",
 			StartTime: twoDayAgo.Add(-30 * time.Second), EndTime: twoDayAgo,
 			System: "anthropic", Status: "done",
@@ -37,12 +62,10 @@ func TestVisualSmoke_AllTabsWithRealData(t *testing.T) {
 			StartTime: twoDayAgo.Add(-30 * time.Second), EndTime: twoDayAgo.Add(-2 * time.Second),
 			System: "anthropic", Status: "done",
 			Attrs: map[string]string{"gen_ai.tool.name": "bash"}},
-		// Trace from yesterday — produces another bucket.
 		{TraceID: "t-d1", SpanID: "d1-root",
 			StartTime: dayAgo.Add(-15 * time.Second), EndTime: dayAgo,
 			System: "anthropic", Status: "error",
 			Attrs: map[string]string{"gen_ai.tool.name": "git_commit"}},
-		// Today's realistic refactor trace.
 		{TraceID: "t-refactor-auth", SpanID: "root",
 			StartTime: now.Add(-30 * time.Second), EndTime: now.Add(-15 * time.Second),
 			System: "anthropic", Status: "done",
@@ -70,9 +93,7 @@ func TestVisualSmoke_AllTabsWithRealData(t *testing.T) {
 	}
 	m, _ = m.Update(SpanBatchMsg{Spans: spans})
 
-	// Simulate pressing key '6' so loadTrendsCmd fires and Trends gets
-	// live-span buckets (this is the F4 backfill path the user reported as
-	// "9 sessions on disk → empty Trends").
+	// Trigger loadTrendsCmd so Trends has data.
 	a := m.(App)
 	if cmd := a.loadTrendsCmd(); cmd != nil {
 		if msg := cmd(); msg != nil {
@@ -87,24 +108,55 @@ func TestVisualSmoke_AllTabsWithRealData(t *testing.T) {
 		a.activeTab = tab
 		view := a.View()
 
-		// Truncate but show enough to spot layout problems.
-		t.Logf("\n========== Tab: %s ==========\n%s\n========== /Tab: %s (%d bytes) ==========",
-			tabNames[tab], view, tabNames[tab], len(view))
+		lines := strings.Split(view, "\n")
+		t.Logf("\n--- tab=%s size=%dx%d rows=%d ---\n%s\n--- /%s ---",
+			tabNames[tab], width, height, len(lines), view, tabNames[tab])
 
-		// Hard checks every tab must pass.
-		if !strings.Contains(view, "1:Sessions") {
-			t.Errorf("[%s] tab bar missing — top-level layout broken", tabNames[tab])
+		// HARD ASSERTIONS that catch the user-reported breakage:
+
+		// 1. Total row count must not exceed terminal height. If it does,
+		//    the user's terminal crops the top → tab bar disappears.
+		if len(lines) > height {
+			t.Errorf("[size=%dx%d tab=%s] rendered %d rows > terminal height %d — "+
+				"top will be cropped, tab bar pushed off-screen",
+				width, height, tabNames[tab], len(lines), height)
 		}
-		if !strings.Contains(view, "╭") && !strings.Contains(view, "┌") {
-			t.Errorf("[%s] no outer border — Panel wrap broken", tabNames[tab])
+
+		// 2. Tab bar must appear on line 1 (line 0 = outer border top).
+		if len(lines) < 2 {
+			t.Errorf("[size=%dx%d tab=%s] too few lines (%d) to contain a tab bar",
+				width, height, tabNames[tab], len(lines))
+			continue
 		}
-		// First-paint sanity at 120×40: no line wider than terminal.
-		for _, line := range strings.Split(view, "\n") {
+		secondLineStripped := stripAnsi(lines[1])
+		if !strings.Contains(secondLineStripped, "1:Sessions") {
+			t.Errorf("[size=%dx%d tab=%s] tab bar NOT on line 1.\nLine 1: %q",
+				width, height, tabNames[tab], secondLineStripped)
+		}
+
+		// 3. No line wider than terminal.
+		for i, line := range lines {
 			rs := []rune(stripAnsi(line))
-			if len(rs) > 120 {
-				t.Errorf("[%s] line %d cols > 120 (overflow): %q", tabNames[tab], len(rs), string(rs)[:min(80, len(string(rs)))])
+			if len(rs) > width {
+				t.Errorf("[size=%dx%d tab=%s] line %d width %d > terminal %d (overflow)",
+					width, height, tabNames[tab], i, len(rs), width)
 				break
 			}
 		}
+
+		// 4. Outer border closed: last non-empty line should contain '╰'.
+		var lastNonEmpty string
+		for i := len(lines) - 1; i >= 0; i-- {
+			if strings.TrimSpace(stripAnsi(lines[i])) != "" {
+				lastNonEmpty = stripAnsi(lines[i])
+				break
+			}
+		}
+		if !strings.Contains(lastNonEmpty, "╰") && !strings.Contains(lastNonEmpty, "└") {
+			t.Errorf("[size=%dx%d tab=%s] outer border missing bottom-close on last line: %q",
+				width, height, tabNames[tab], lastNonEmpty)
+		}
 	}
 }
+
+var _ = fmt.Sprintf // keep import for future use

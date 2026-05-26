@@ -649,6 +649,12 @@ func (a App) renderStatusBar(width int) string {
 		help = strings.Join(parts, " │ ")
 	}
 
+	// Hard truncate so the status bar can never wrap to a second line.
+	// Wrapping pushed the tab bar off-screen on narrow terminals (80x24)
+	// because the rendered output gained a row and the outer border
+	// dragged the top out of the user's viewport.
+	help = truncateToWidth(help, innerWidth)
+
 	return StatusBarStyle.Width(width).Render(
 		lipgloss.PlaceHorizontal(innerWidth, lipgloss.Left, help),
 	)

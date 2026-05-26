@@ -615,9 +615,29 @@ func (t SkillsTab) View() string {
 		return "Skills"
 	}
 
-	// Layout: search input is embedded inside the Skills panel (1 line).
-	// The full height is used for the list+preview panels.
-	listHeight := max(3, t.height)
+	// Render the wizard overlay centered on top when it is visible.
+	if t.wizard.visible {
+		overlay := t.wizard.View()
+		return lipgloss.Place(
+			t.width, t.height,
+			lipgloss.Center, lipgloss.Center,
+			overlay,
+			lipgloss.WithWhitespaceForeground(colorDim),
+		)
+	}
+
+	// Build the bottom (catalog + advisor) sections FIRST so we know how
+	// many rows they consume, then subtract from the height budget when
+	// allocating the split-view panel. Before this fix the splitView took
+	// the full t.height, so catalog + advisor pushed the total render past
+	// t.height and the terminal cropped the top — silently hiding the tab
+	// bar above (user-reported regression).
+	catalogSection := t.renderCatalogSection(t.width)
+	advisorSection := renderAdvisorSection(t.recommendations, t.width, t.pipelineRan)
+
+	bottomHeight := countLines(catalogSection) + countLines(advisorSection) + 2 // two "\n" joiners
+
+	listHeight := max(3, t.height-bottomHeight)
 
 	leftW, rightW, showPreview := SplitLayout(t.width, 45)
 
@@ -633,20 +653,15 @@ func (t SkillsTab) View() string {
 		splitView = RenderPanel("Skills", leftContent, leftW, listHeight, true)
 	}
 
-	// Render the wizard overlay centered on top when it is visible.
-	if t.wizard.visible {
-		overlay := t.wizard.View()
-		return lipgloss.Place(
-			t.width, t.height,
-			lipgloss.Center, lipgloss.Center,
-			overlay,
-			lipgloss.WithWhitespaceForeground(colorDim),
-		)
-	}
-
-	catalogSection := t.renderCatalogSection(t.width)
-	advisorSection := renderAdvisorSection(t.recommendations, t.width, t.pipelineRan)
 	return splitView + "\n" + catalogSection + "\n" + advisorSection
+}
+
+// countLines returns the number of lines in s. Empty string → 0.
+func countLines(s string) int {
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
 }
 
 // CatalogItems returns the currently loaded catalog items.
