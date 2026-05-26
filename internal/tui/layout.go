@@ -219,7 +219,10 @@ func RenderEmptyState(message string, width, height int) string {
 	)
 }
 
-// RenderLoadingState renders a centered styled loading indicator.
+// RenderLoadingState renders a centered styled loading indicator, wrapped
+// in a Panel so it matches the visual treatment of populated tabs. Before
+// the F3 fix every "Loading" tab rendered as borderless centered text,
+// which made the active tab look broken on Control/Hooks/Cost/Sessions.
 func RenderLoadingState(width, height int) string {
 	spinner := lipgloss.NewStyle().
 		Foreground(colorPrimary).
@@ -229,13 +232,14 @@ func RenderLoadingState(width, height int) string {
 		Foreground(colorDim).
 		Render("Fetching data...")
 	content := spinner + "\n" + subtitle
-	return lipgloss.Place(
-		max(0, width),
-		max(0, height),
+	inner := lipgloss.Place(
+		max(0, width-2),
+		max(0, height-2),
 		lipgloss.Center,
 		lipgloss.Center,
 		content,
 	)
+	return RenderPanel("Loading", inner, max(0, width), max(3, height), true)
 }
 
 // renderErrorState renders an error message in error color.

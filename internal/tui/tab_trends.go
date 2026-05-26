@@ -47,28 +47,33 @@ func (t *TrendsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 	return t, nil
 }
 
-// View renders the Trends tab. It shows:
-//   - A header line with bucket count and lookback window.
-//   - An empty-state message when fewer than MinBucketsForDisplay buckets exist.
-//   - Per-signal-type rows with sparkline + last value + delta vs mean.
-//   - A fidelity tier legend at the bottom.
+// View renders the Trends tab wrapped in a RenderPanel so it visually
+// matches every other tab (F2 fix from smoke-test report).
 func (t *TrendsTab) View() string {
+	if t.width == 0 || t.height == 0 {
+		return "Trends"
+	}
+	content, title := t.renderInner()
+	return RenderPanel(title, content, t.width, max(3, t.height), true)
+}
+
+// renderInner produces the body content + the panel title. Kept separate
+// from View() so unit tests can assert on body content without parsing the
+// surrounding box characters.
+func (t *TrendsTab) renderInner() (string, string) {
 	nonEmpty := countNonEmpty(t.buckets)
 
 	if nonEmpty < trends.MinBucketsForDisplay {
-		return renderTrendsEmptyState(len(t.buckets), nonEmpty)
+		return renderTrendsEmptyState(len(t.buckets), nonEmpty),
+			"Trends · longitudinal signals"
 	}
 
 	var sb strings.Builder
 
-	// Header
-	sb.WriteString(fmt.Sprintf("Trends — %d buckets over %d days\n\n",
-		len(t.buckets), trends.DefaultLookbackDays))
-
 	// Column headers (ν-5: added Start column)
 	sb.WriteString(fmt.Sprintf("%-28s  %-12s  %6s  %6s  %12s\n",
 		"Signal Type", "Sparkline", "Start", "Last", "Δ vs avg"))
-	sb.WriteString(strings.Repeat("─", min(t.width, 80)))
+	sb.WriteString(strings.Repeat("─", min(t.width-4, 80)))
 	sb.WriteString("\n")
 
 	// One row per known signal type, sorted deterministically.
@@ -82,7 +87,9 @@ func (t *TrendsTab) View() string {
 	sb.WriteString("\n")
 	sb.WriteString(renderFidelityTierLegend())
 
-	return sb.String()
+	title := fmt.Sprintf("Trends · %d buckets over %d days",
+		len(t.buckets), trends.DefaultLookbackDays)
+	return sb.String(), title
 }
 
 // SetSize updates the stored terminal dimensions.

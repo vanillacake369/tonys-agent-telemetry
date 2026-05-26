@@ -566,11 +566,11 @@ func renderTabBar(active Tab, width int) string {
 		label := td.num + ":" + tabNames[td.tab]
 		var rendered string
 		if td.tab == active {
-			// Prepend a dot indicator to the active tab.
-			rendered = ActiveTabStyle.Render("● " + label)
+			// Prepend a single-char dot indicator to the active tab.
+			rendered = ActiveTabStyle.Render("●" + label)
 		} else {
-			// Pad with spaces to align with the dot indicator.
-			rendered = InactiveTabStyle.Render("  " + label)
+			// Pad with one space so width matches the active "●" prefix.
+			rendered = InactiveTabStyle.Render(" " + label)
 		}
 		if i < len(tabDefs)-1 {
 			rendered += TabSeparatorStyle.Render(tabSeparator)

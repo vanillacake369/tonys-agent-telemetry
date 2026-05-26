@@ -35,15 +35,15 @@ var (
 
 	// ActiveTabStyle renders the currently selected tab label.
 	// Bold + primary color with a dot indicator prefix (applied in renderTabBar).
+	// No padding here — the dot/space prefix in renderTabBar handles spacing,
+	// keeping the 7-tab bar one-line at 80 cols.
 	ActiveTabStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(colorPrimary).
-			Padding(0, 1)
+			Foreground(colorPrimary)
 
 	// InactiveTabStyle renders unselected tab labels.
 	InactiveTabStyle = lipgloss.NewStyle().
-				Foreground(colorDim).
-				Padding(0, 1)
+				Foreground(colorDim)
 
 	// TabBarStyle wraps the entire tab bar row.
 	// No border — clean text-only row.
@@ -85,4 +85,6 @@ var (
 )
 
 // tabSeparator is the character placed between tab labels.
-const tabSeparator = " │ "
+// Two spaces keeps the 7-tab bar one-line at 80 cols (F1 fix from
+// smoke-test report).
+const tabSeparator = "  "
