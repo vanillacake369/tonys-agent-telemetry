@@ -37,6 +37,7 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
         run: |
           go build -ldflags "-s -w -X main.version=${{ github.sha }}" -o bin/tonys-agent-telemetry-${{ matrix.goos }}-${{ matrix.goarch }} .
       - uses: actions/upload-artifact@v4

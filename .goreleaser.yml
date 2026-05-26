@@ -6,14 +6,16 @@ builds:
     binary: tonys-agent-telemetry
     goos: [linux, darwin]
     goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=0
     ldflags:
       - -s -w
       - -X main.version={{.Version}}
 
 archives:
   - id: default
-    builds: [main]
-    format: tar.gz
+    ids: [main]
+    formats: [tar.gz]
     name_template: "tonys-agent-telemetry_{{ .Os }}_{{ .Arch }}"
 
 checksum:

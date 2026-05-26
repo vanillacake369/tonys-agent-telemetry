@@ -3,6 +3,10 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
+# Force pure-Go builds — no transitive cgo, simpler cross-compilation,
+# smaller static binaries. Matches .goreleaser.yml + ci.yml.
+export CGO_ENABLED := 0
+
 # Default target
 help:
 	@echo "tonys-agent-telemetry — make targets"
