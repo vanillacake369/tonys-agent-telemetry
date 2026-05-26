@@ -8,17 +8,13 @@ TUI dashboard for Claude Code sessions, agents, DAG visualization, and skill mar
 
 ## Demo
 
-A 90-second narrated tour: bash intro explains what the project is and what you'll see, then walks through every tab in order (Sessions · Skills+Advisor · Cost · Hooks · DAG with overview+search · Trends · Control), closing with the headless `--emit-signals` CLI path.
+A ~55-second tour with a realistic interaction in every tab — search a skill, open a trace into the DAG, toggle overview mode, match `/bash`, read the longitudinal sparkline — closing with the headless `--emit-signals` CLI path.
 
 <p align="center">
   <img src="docs/demo/tour.gif" alt="tonys-agent-telemetry tour" width="900" />
 </p>
 
-<p align="center">
-  <a href="https://asciinema.org/a/REPLACE_WITH_CAST_ID">▶ Watch on asciinema (interactive playback)</a>
-</p>
-
-Regenerate the GIF: `make demo`. Record a live asciinema cast: `make demo-asciinema`. Full contributor workflow in [`docs/DEMO_RECORDING_GUIDE.md`](docs/DEMO_RECORDING_GUIDE.md).
+Regenerate the GIF: `make demo`. Contributor workflow in [`docs/DEMO_RECORDING_GUIDE.md`](docs/DEMO_RECORDING_GUIDE.md).
 
 ## Features
 

@@ -1,4 +1,4 @@
-.PHONY: build test test-race vet lint lint-strict fmt fmt-check hooks-install clean install ci release-dry demo demo-asciinema help
+.PHONY: build test test-race vet lint lint-strict fmt fmt-check hooks-install clean install ci release-dry demo help
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
@@ -26,7 +26,6 @@ help:
 	@echo "  clean         Remove bin/, dist/, result"
 	@echo "  release-dry   GoReleaser snapshot build"
 	@echo "  demo          Regenerate docs/demo/tour.gif from tour.tape (needs vhs)"
-	@echo "  demo-asciinema Record a live asciinema cast → tour.cast"
 	@echo ""
 	@echo "VERSION=$(VERSION)"
 
@@ -99,21 +98,13 @@ release-dry:
 
 # Regenerate the README demo GIF from scripts/demo/tour.tape. Requires:
 #   brew install vhs ttyd ffmpeg
-# Output: docs/demo/tour.gif
+# Output: docs/demo/tour.gif. Single source of truth — tour.tape encodes
+# the entire ~55s walkthrough with realistic per-tab interactions.
 demo: build
 	@if ! command -v vhs > /dev/null 2>&1; then \
-		echo "vhs not installed — see docs/DEMO_RECORDING_GUIDE.md"; \
+		echo "vhs not installed — brew install vhs ttyd ffmpeg"; \
+		echo "Workflow: docs/DEMO_RECORDING_GUIDE.md"; \
 		exit 1; \
 	fi
 	vhs scripts/demo/tour.tape
 	@echo "Wrote: docs/demo/tour.gif"
-
-# Interactive asciinema path — records a real session into tour.cast.
-# Walk through the suggested key sequence (see DEMO_RECORDING_GUIDE.md).
-demo-asciinema: build
-	@if ! command -v asciinema > /dev/null 2>&1; then \
-		echo "asciinema not installed — brew install asciinema"; \
-		exit 1; \
-	fi
-	asciinema rec --idle-time-limit 1 --title 'tonys-agent-telemetry tour' tour.cast -c 'bash scripts/demo/tour.sh'
-	@echo "Wrote: tour.cast (upload with: asciinema upload tour.cast)"
