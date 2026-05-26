@@ -180,6 +180,42 @@ This is why no LiteLLM-style proxy is built into this binary: LiteLLM
 already emits OTLP and pointing its exporter here gives you the same
 visibility plus LiteLLM's routing/cost-tracking on top.
 
+## Verifying release artefacts
+
+Every tagged release ships with:
+
+- **Cosign keyless signatures** — each archive, Linux package, checksums file, and SBOM has a sibling `.sig` (signature) and `.pem` (Fulcio certificate).
+- **SLSA L3 provenance** — `tonys-agent-telemetry.intoto.jsonl` in the release lists every artefact, the source commit, and the workflow that built it.
+
+Verify a downloaded binary:
+
+```sh
+# 1. Cosign signature (no key needed — verifies via GH Actions OIDC identity).
+cosign verify-blob \
+  --certificate tonys-agent-telemetry_linux_amd64.tar.gz.pem \
+  --signature   tonys-agent-telemetry_linux_amd64.tar.gz.sig \
+  --certificate-identity-regexp '^https://github\.com/vanillacake369/tonys-agent-telemetry/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  tonys-agent-telemetry_linux_amd64.tar.gz
+
+# 2. SLSA provenance.
+slsa-verifier verify-artifact \
+  --provenance-path tonys-agent-telemetry.intoto.jsonl \
+  --source-uri github.com/vanillacake369/tonys-agent-telemetry \
+  tonys-agent-telemetry_linux_amd64.tar.gz
+```
+
+## For contributors
+
+```sh
+# One-time hook install per clone — runs gofmt + vet + short tests on
+# every commit and enforces Conventional Commits subject lines.
+make hooks-install
+
+# Local pre-PR checks (matches what CI gates on).
+make ci
+```
+
 ## Claude Code integration
 
 `tonys-agent-telemetry` reads Claude Code activity directly from the JSONL files under `~/.claude/projects/` — no hook installation required. Provider auto-detection (see Features) picks up sessions as they accumulate; the DAG / Sessions / Skills tabs reflect them on the next refresh.

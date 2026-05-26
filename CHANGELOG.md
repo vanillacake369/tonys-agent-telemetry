@@ -13,9 +13,30 @@ generated automatically by GoReleaser on every `v*` tag push. See
 
 Nothing scheduled.
 
-## [0.1.0] — TBD
+## [0.1.0] — 2026-05-26
 
 First public release.
+
+### Manual-smoke fixes (gathered in the final user-test pass)
+
+- **Tab bar overflow (F1)**: 7-tab bar wrapped to 2 lines at 80–100 cols.
+  Compacted separator + dropped per-label padding so the bar fits one line at 80×24.
+- **Trends tab missing inner Panel (F2)** and **Loading state missing border (F3)**:
+  every tab now renders inside a `RenderPanel` regardless of populated/loading state.
+- **Trends "9 sessions on disk but empty" (F4)**: `loadTrendsCmd` now derives
+  `SessionSnapshot` entries from the live span buffer, grouped by trace, bucketed
+  by trace end-time. Historical sessions appear immediately on tab open.
+- **DAG nested / no whole-trace view / n,N invisible (F5)**: new `g` overview
+  mode shows one-line-per-span depth-first walk of the entire trace with
+  status icon + duration + error suffix. Search bar surfaces `match X of Y`,
+  `no matches`, and the typing-in-progress states.
+- **Codex/Gemini "unknown provider" + Claude black screen (F6)**: dropped the
+  fragile `localhost:4001` cli-proxy-api routing; `claude` now invokes via
+  `tea.ExecProcess` (full interactive PTY), `gemini` routes via the native CLI,
+  `codex` is removed (no current Codex CLI). Wizard hides models whose binary
+  isn't on PATH.
+- **DAG functionality unclear (F7)**: visible help banners in both traces and
+  graph modes spell out the available keys.
 
 ### Added
 
