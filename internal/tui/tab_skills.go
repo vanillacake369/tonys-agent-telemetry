@@ -173,8 +173,19 @@ func (t SkillsTab) Update(msg tea.Msg) (TabModel, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case AnalyzeExecuteMsg:
-		_ = executeAnalysis(msg.Model, msg.Prompt)
+		cmd, err := buildAnalyzeCmd(msg.Model, msg.Prompt)
+		if err != nil {
+			t.err = err
+			t.wizard.visible = false
+			return t, nil
+		}
 		t.wizard.visible = false
+		return t, tea.ExecProcess(cmd, func(execErr error) tea.Msg {
+			return AnalyzeFinishedMsg{Err: execErr}
+		})
+
+	case AnalyzeFinishedMsg:
+		t.err = msg.Err
 		return t, nil
 
 	case LocalSkillsLoadedMsg:

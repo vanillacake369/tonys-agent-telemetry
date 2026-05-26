@@ -1,15 +1,15 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
-	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/vanillacake369/tonys-agent-telemetry/internal/platform"
 	"github.com/vanillacake369/tonys-agent-telemetry/internal/skill"
 )
 
@@ -29,6 +29,16 @@ type AnalyzeExecuteMsg struct {
 	Prompt string
 }
 
+// AnalyzeFinishedMsg is sent (via tea.ExecProcess callback) when the analysis
+// process exits. Err is non-nil on non-zero exit or launch failure.
+type AnalyzeFinishedMsg struct{ Err error }
+
+// ErrCodexRemoved is returned for the "codex" model.
+// Removed 2026-05-26: no Codex CLI; old cli-proxy-api (localhost:4001) was broken.
+var ErrCodexRemoved = errors.New(
+	"codex removed (2026-05-26): use 'claude' or 'gemini' instead",
+)
+
 // defaultAnalyzeTemplate is the prompt template used when no custom prompt is given.
 const defaultAnalyzeTemplate = `Analyze this Claude Code skill for my workflow:
 
@@ -45,8 +55,46 @@ Please tell me:
 3. Compatibility with my setup (Nix, multi-provider agents, NixOS k8s)
 4. Any security or performance concerns`
 
-// analyzeTempFile is the temp file path used to pass the prompt to the shell command.
-const analyzeTempFile = "/tmp/tat-analyze-prompt.txt"
+// noModelsHint is displayed in the model picker when no model CLI is on PATH.
+const noModelsHint = "No analysis models found on PATH.\nInstall `claude` or `gemini` CLI."
+
+// lookPath is injected by tests for determinism; production uses exec.LookPath.
+var lookPath = exec.LookPath
+
+// modelCLIs is the SSoT table of supported models. codex removed (see ErrCodexRemoved).
+var modelCLIs = []struct {
+	model  string
+	binary string
+}{
+	{"claude", "claude"},
+	{"gemini", "gemini"},
+}
+
+// availableAnalyzeModels returns models whose binary is on PATH.
+func availableAnalyzeModels() []string {
+	var available []string
+	for _, m := range modelCLIs {
+		if _, err := lookPath(m.binary); err == nil {
+			available = append(available, m.model)
+		}
+	}
+	return available
+}
+
+// buildAnalyzeCmd returns an *exec.Cmd for tea.ExecProcess.
+// Prompt is passed as an argv argument — no shell, no temp-file cat.
+// codex: removed 2026-05-26 (ErrCodexRemoved).
+func buildAnalyzeCmd(model, prompt string) (*exec.Cmd, error) {
+	switch model {
+	case "claude":
+		return exec.Command("claude", prompt), nil
+	case "gemini":
+		return exec.Command("gemini", "--prompt", prompt), nil
+	case "codex":
+		return nil, ErrCodexRemoved
+	}
+	return nil, fmt.Errorf("analyze: unknown model %q", model)
+}
 
 // AnalyzeWizard is a multi-step overlay that lets the user choose a model and
 // review/edit a prompt before running an AI analysis of a skill.
@@ -68,7 +116,8 @@ type AnalyzeWizard struct {
 	keys   KeyMap
 }
 
-// NewAnalyzeWizard creates a new AnalyzeWizard with default settings.
+// NewAnalyzeWizard creates a new AnalyzeWizard. Models are filtered to those
+// whose binary is on PATH via availableAnalyzeModels().
 func NewAnalyzeWizard() AnalyzeWizard {
 	ta := textarea.New()
 	ta.ShowLineNumbers = false
@@ -77,18 +126,20 @@ func NewAnalyzeWizard() AnalyzeWizard {
 	ta.SetHeight(12)
 
 	return AnalyzeWizard{
-		models: []string{"claude", "codex", "gemini"},
+		models: availableAnalyzeModels(),
 		prompt: ta,
 		keys:   DefaultKeyMap(),
 	}
 }
 
 // Show opens the wizard for the given skill and pre-populates the prompt.
+// Refreshes the model list so PATH changes between calls are reflected.
 func (w *AnalyzeWizard) Show(s skill.Skill, readme string) {
 	w.visible = true
 	w.step = StepModel
 	w.modelCursor = 0
 	w.skill = s
+	w.models = availableAnalyzeModels()
 
 	excerpt := readme
 	const maxReadme = 2000
@@ -150,14 +201,17 @@ func (w AnalyzeWizard) updateModelStep(msg tea.KeyMsg) (AnalyzeWizard, tea.Cmd) 
 		return w, nil
 
 	case msg.Type == tea.KeyTab:
-		// Tab: use default model (first = "claude") and advance.
+		// Tab: use default model (first available) and advance.
 		w.modelCursor = 0
 		w.step = StepPrompt
 		w.prompt.Focus()
 		return w, textarea.Blink
 
 	case key.Matches(msg, w.keys.Enter):
-		// Enter: confirm selection and advance.
+		// Enter: confirm selection and advance (only if models are available).
+		if len(w.models) == 0 {
+			return w, nil
+		}
 		w.step = StepPrompt
 		w.prompt.Focus()
 		return w, textarea.Blink
@@ -218,6 +272,7 @@ func (w AnalyzeWizard) View() string {
 }
 
 // viewModelStep renders the model selection step.
+// When no models are available it shows an install hint instead of an empty list.
 func (w AnalyzeWizard) viewModelStep() string {
 	titleStr := "Analyze: " + w.skill.Name
 
@@ -226,6 +281,19 @@ func (w AnalyzeWizard) viewModelStep() string {
 	textStyle := lipgloss.NewStyle().Foreground(colorText)
 
 	var lines []string
+
+	if len(w.models) == 0 {
+		// No CLIs on PATH — show install hint.
+		lines = append(lines, textStyle.Render(noModelsHint))
+		lines = append(lines, "")
+		lines = append(lines, dimStyle.Render("Esc: cancel"))
+		content := strings.Join(lines, "\n")
+		innerContent := lipgloss.NewStyle().Padding(1, 3).Render(content)
+		panelWidth := lipgloss.Width(innerContent) + 4
+		panelHeight := lipgloss.Height(innerContent) + 4
+		return RenderPanel(titleStr, innerContent, panelWidth, panelHeight, true)
+	}
+
 	lines = append(lines, textStyle.Render("Select model:"))
 	lines = append(lines, "")
 
@@ -279,44 +347,4 @@ func (w AnalyzeWizard) viewPromptStep() string {
 	panelHeight := lipgloss.Height(innerContent) + 4
 
 	return RenderPanel(titleStr, innerContent, panelWidth, panelHeight, true)
-}
-
-// buildAnalyzeCmd writes the prompt to a temp file and returns the shell command
-// string that should be passed to platform.OpenPane.
-func buildAnalyzeCmd(model, prompt string) (string, error) {
-	if err := os.WriteFile(analyzeTempFile, []byte(prompt), 0600); err != nil {
-		return "", fmt.Errorf("analyze: write prompt file: %w", err)
-	}
-
-	switch model {
-	case "claude":
-		return fmt.Sprintf(
-			`claude -p "$(cat %s)" && rm -f %s`,
-			analyzeTempFile, analyzeTempFile,
-		), nil
-	case "codex", "gemini":
-		// Route via cli-proxy-api.
-		return fmt.Sprintf(
-			`curl -s http://127.0.0.1:4001/v1/chat/completions `+
-				`-H 'Content-Type: application/json' `+
-				`-d "{\"model\":\"%s\",\"messages\":[{\"role\":\"user\",\"content\":\"$(cat %s | sed 's/\"/\\\\\"/g')\"}]}" `+
-				`&& rm -f %s`,
-			model, analyzeTempFile, analyzeTempFile,
-		), nil
-	}
-
-	// Fallback: treat unknown models as claude.
-	return fmt.Sprintf(
-		`claude -p "$(cat %s)" && rm -f %s`,
-		analyzeTempFile, analyzeTempFile,
-	), nil
-}
-
-// executeAnalysis writes the prompt to a temp file and opens a new pane.
-func executeAnalysis(model, prompt string) error {
-	cmd, err := buildAnalyzeCmd(model, prompt)
-	if err != nil {
-		return err
-	}
-	return platform.Detect().OpenPane(cmd)
 }
