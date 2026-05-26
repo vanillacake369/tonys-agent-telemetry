@@ -1,4 +1,4 @@
-.PHONY: build test test-race vet lint lint-strict fmt fmt-check hooks-install clean install ci release-dry demo demo-one help
+.PHONY: build test test-race vet lint lint-strict fmt fmt-check hooks-install clean install ci release-dry demo demo-asciinema help
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
@@ -25,8 +25,8 @@ help:
 	@echo "  install       go install the binary to GOPATH/bin"
 	@echo "  clean         Remove bin/, dist/, result"
 	@echo "  release-dry   GoReleaser snapshot build"
-	@echo "  demo          Regenerate every README GIF (needs vhs)"
-	@echo "  demo-one      Regenerate one GIF: TAPE=scripts/demo/<file>.tape"
+	@echo "  demo          Regenerate docs/demo/tour.gif from tour.tape (needs vhs)"
+	@echo "  demo-asciinema Record a live asciinema cast → tour.cast"
 	@echo ""
 	@echo "VERSION=$(VERSION)"
 
@@ -97,21 +97,23 @@ release-dry:
 	@# dry-runs. CI installs both via the workflow.
 	goreleaser release --snapshot --clean --skip=sbom,sign,publish
 
-# Regenerate every README demo GIF from the .tape scripts. Requires:
+# Regenerate the README demo GIF from scripts/demo/tour.tape. Requires:
 #   brew install vhs ttyd ffmpeg
-# Output: docs/demo/<scenario>.gif (one per .tape file).
+# Output: docs/demo/tour.gif
 demo: build
 	@if ! command -v vhs > /dev/null 2>&1; then \
 		echo "vhs not installed — see docs/DEMO_RECORDING_GUIDE.md"; \
 		exit 1; \
 	fi
-	@for tape in scripts/demo/*.tape; do \
-		echo "→ $$tape"; \
-		vhs $$tape; \
-	done
-	@echo "Wrote: docs/demo/*.gif"
+	vhs scripts/demo/tour.tape
+	@echo "Wrote: docs/demo/tour.gif"
 
-# Regenerate a single demo GIF: make demo-one TAPE=scripts/demo/dag-flow.tape
-demo-one: build
-	@if [ -z "$(TAPE)" ]; then echo "usage: make demo-one TAPE=scripts/demo/<file>.tape"; exit 2; fi
-	vhs $(TAPE)
+# Interactive asciinema path — records a real session into tour.cast.
+# Walk through the suggested key sequence (see DEMO_RECORDING_GUIDE.md).
+demo-asciinema: build
+	@if ! command -v asciinema > /dev/null 2>&1; then \
+		echo "asciinema not installed — brew install asciinema"; \
+		exit 1; \
+	fi
+	asciinema rec --idle-time-limit 1 --title 'tonys-agent-telemetry tour' tour.cast -c 'bash scripts/demo/tour.sh'
+	@echo "Wrote: tour.cast (upload with: asciinema upload tour.cast)"

@@ -8,23 +8,17 @@ TUI dashboard for Claude Code sessions, agents, DAG visualization, and skill mar
 
 ## Demo
 
+A 90-second narrated tour: bash intro explains what the project is and what you'll see, then walks through every tab in order (Sessions · Skills+Advisor · Cost · Hooks · DAG with overview+search · Trends · Control), closing with the headless `--emit-signals` CLI path.
+
 <p align="center">
-  <img src="docs/demo/quickstart.gif" alt="Launch + 7-tab tour" width="720" />
+  <img src="docs/demo/tour.gif" alt="tonys-agent-telemetry tour" width="900" />
 </p>
 
-<details>
-<summary>📺 More recordings — DAG · Advisor · Trends · CLI</summary>
+<p align="center">
+  <a href="https://asciinema.org/a/REPLACE_WITH_CAST_ID">▶ Watch on asciinema (interactive playback)</a>
+</p>
 
-| Feature | Recording |
-|---|---|
-| **DAG** — traces list → graph view → `g` overview → `/bash` search → `n`/`N` cycle | <img src="docs/demo/dag-flow.gif" alt="DAG flow" width="720" /> |
-| **Advisor** — Skills tab catalog loads + Advisor pane populates with evidence-backed recommendations (SignalID + TraceID citations) | <img src="docs/demo/advisor-flow.gif" alt="Advisor flow" width="720" /> |
-| **Trends** — longitudinal sparklines + Start/Last/Δ vs avg + per-provider fidelity tier legend | <img src="docs/demo/trends-flow.gif" alt="Trends" width="720" /> |
-| **CLI** — `--emit-signals --replay <file> \| jq` for headless analysis | <img src="docs/demo/cli-emit-signals.gif" alt="CLI signals" width="720" /> |
-
-Regenerate any of these with `make demo` (or `make demo-one TAPE=scripts/demo/<file>.tape`).
-Contributor workflow: [`docs/DEMO_RECORDING_GUIDE.md`](docs/DEMO_RECORDING_GUIDE.md).
-</details>
+Regenerate the GIF: `make demo`. Record a live asciinema cast: `make demo-asciinema`. Full contributor workflow in [`docs/DEMO_RECORDING_GUIDE.md`](docs/DEMO_RECORDING_GUIDE.md).
 
 ## Features
 
