@@ -1,273 +1,186 @@
 # tonys-agent-telemetry
 
-TUI dashboard for Claude Code sessions, agents, DAG visualization, and skill marketplace.
+> Observe, govern, and learn from your local AI agents — in the terminal.
 
-![Go Version](https://img.shields.io/badge/go-1.26-blue)
+![Go Version](<https://img.shields.io/badge/go-1.26%2B%20(source%20only)-blue>)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macOS-lightgrey)
+![Release](https://img.shields.io/github/v/release/vanillacake369/tonys-agent-telemetry)
 
-## Demo
+local-first TUI that watches AI-agent
+activity across providers (Claude Code, OTLP-emitting frameworks, vLLM,
+Ollama), reconstructs the orchestration as a DAG, extracts behavioural
+signals, and recommends best-practice skills — with citations to the
+exact signal that triggered each recommendation.
 
-A ~55-second tour with a realistic interaction in every tab — search a skill, open a trace into the DAG, toggle overview mode, match `/bash`, read the longitudinal sparkline — closing with the headless `--emit-signals` CLI path.
+Single static Go binary. No daemon, no database, no SaaS, no signup.
 
 <p align="center">
   <img src="docs/demo/tour.gif" alt="tonys-agent-telemetry tour" width="900" />
 </p>
 
-Regenerate the GIF: `make demo`. Contributor workflow in [`docs/DEMO_RECORDING_GUIDE.md`](docs/DEMO_RECORDING_GUIDE.md).
+## Quickstart
+
+```sh
+# 1. Install (any of these)
+brew install vanillacake369/tap/tonys-agent-telemetry
+# or: nix run github:vanillacake369/tonys-agent-telemetry
+# or: go install github.com/vanillacake369/tonys-agent-telemetry@latest
+
+# 2. Launch
+tonys-agent-telemetry
+
+# 3. The Sessions tab auto-populates from ~/.claude/projects/.
+#    Press 1-6 (or Tab/Shift+Tab) to cycle tabs.
+#    Press ^G to open the Control tab.
+#    Press ? at any time for the which-key overlay.
+```
+
+If `~/.claude/projects/` is empty, all tabs render empty-state guides.
+Run any Claude Code session, then re-launch.
 
 ## Features
 
-- **Sessions** — Fuzzy-find and resume past Claude Code sessions; fork or continue any session
-- **Skills** — Local + GitHub skill search **plus** a best-practice catalog (181 entries from `FlorianBruniaux/claude-code-ultimate-guide`, CC-BY-SA-4.0) **plus** an Advisor pane that recommends skills based on signals extracted from your real session activity, with `(SignalID, CatalogItemID)` dual citation on every recommendation
-- **Cost** — Aggregated cost/usage dashboard by provider, model, project
-- **Hooks** — Visualize Claude Code hook configuration (`~/.claude/settings.json`) with workflow diagram
-- **DAG** — Live agent orchestration graph across all detected providers (Claude Code, vLLM, Ollama, anything OTel-emitting), with provider badges, status colors, in-graph `/`-search, and tmux/zellij-safe dynamic resize
-- **Trends** — Longitudinal signal sparklines (`▁▂▃▄▅▆▇█`) with per-signal-type Start/Last/Δ vs avg, fed by automatic 5-minute flushes to a local signal store (JSONL with flock + auto-rotation)
-- **Control** — Runtime governance: per-session/per-day USD budget caps, tool allow/denylists, live denial log
+- **Sessions** — Browse and resume past Claude Code sessions; fork to explore a branch.
+- **Skills** — Search local + GitHub skills; a best-practice catalog (181 entries, CC-BY-SA-4.0) plus an Advisor pane that recommends skills based on your real session activity, with dual citations on every recommendation.
+- **Cost** — Per-provider and per-model spending dashboard.
+- **Hooks** — Visualise `~/.claude/settings.json` hook events and scripts as a workflow diagram.
+- **DAG** — Live multi-provider agent orchestration graph with provider badges, status colours, in-graph `/`-search, `n`/`N` cycle, and `g` for compact overview.
+- **Trends** — Longitudinal sparklines (`▁▂▃▄▅▆▇█`) per signal type with Start / Last / Δ vs avg + per-provider fidelity tier legend.
+- **Control** — Read-only governance view: policy, budget burn-down, denial log.
 
-### Auto-detected providers (Phase 3)
+### Auto-detected providers
 
-Launch the TUI; each provider runs only if detected:
+Each provider activates only when detected.
 
-| Provider | Detection | Telemetry |
-|----------|-----------|-----------|
-| **Claude Code** | `~/.claude/projects/` | Backfill from JSONL + live hook events |
-| **OTLP/HTTP** | `:4318` bindable | Receives spans from LangGraph, CrewAI, AutoGen, OpenAI Agents SDK, LiteLLM, TGI, OpenRouter, Letta, smolagents, etc. |
-| **vLLM** | `:8000/metrics` returns `vllm:` prefix | Prometheus scrape, per-model token deltas |
-| **Ollama** | `:11434/api/tags` returns JSON with `models` | Poll `/api/ps` for loaded models |
+| Provider        | Detection                              | Fidelity                                             |
+| --------------- | -------------------------------------- | ---------------------------------------------------- |
+| **Claude Code** | `~/.claude/projects/` exists           | Full (timestamps, tokens, parent-child)              |
+| **OTLP/HTTP**   | port `4318` bindable on localhost      | Full when caller emits `gen_ai.*` + `parent_span_id` |
+| **vLLM**        | `:8000/metrics` exposes `vllm:` series | Aggregate only (no per-call parent linkage)          |
+| **Ollama**      | `:11434/api/tags` responds             | Presence only (model-load timeline, no token counts) |
+
+Anything that emits OTLP/JSON to the receiver counts — LangGraph,
+CrewAI, AutoGen, OpenAI Agents SDK, LiteLLM, TGI, OpenRouter, Letta,
+smolagents. No plugin loading; the OTLP endpoint IS the integration
+interface.
 
 ## Installation
 
-### Nix (recommended)
-
-```sh
-nix run github:vanillacake369/tonys-agent-telemetry
-```
-
-Or add to your flake:
-
-```nix
-inputs.tonys-agent-telemetry.url = "github:vanillacake369/tonys-agent-telemetry";
-```
-
-### Go
-
-```sh
-go install github.com/vanillacake369/tonys-agent-telemetry@latest
-```
-
-### Homebrew (future)
+### Homebrew (macOS + Linux)
 
 ```sh
 brew install vanillacake369/tap/tonys-agent-telemetry
 ```
 
-### Binary
-
-Download the latest release from [GitHub Releases](https://github.com/vanillacake369/tonys-agent-telemetry/releases) and extract:
+### Nix
 
 ```sh
-tar -xzf tonys-agent-telemetry_linux_amd64.tar.gz
-mv tonys-agent-telemetry /usr/local/bin/
+nix run github:vanillacake369/tonys-agent-telemetry
 ```
 
-## Usage
+Or pin to your flake:
+
+```nix
+inputs.tonys-agent-telemetry.url = "github:vanillacake369/tonys-agent-telemetry";
+```
+
+### Linux packages (.deb / .rpm / .apk)
+
+Download the matching package from the [latest release][rel], then:
 
 ```sh
-tonys-agent-telemetry          # Launch TUI
-tonys-agent-telemetry --help   # Print usage
-tonys-agent-telemetry --version
+sudo apt install ./tonys-agent-telemetry_*.deb     # Debian / Ubuntu
+sudo dnf install ./tonys-agent-telemetry_*.rpm     # Fedora / RHEL
+sudo apk add --allow-untrusted ./tonys-agent-telemetry_*.apk
 ```
 
-### Key Bindings
-
-| Key          | Action                                  |
-|--------------|-----------------------------------------|
-| `1`          | Switch to Sessions tab                  |
-| `2`          | Switch to Skills tab                    |
-| `3`          | Switch to Cost tab                      |
-| `4`          | Switch to Hooks tab                     |
-| `5`          | Switch to DAG tab                       |
-| `6`          | Switch to Trends tab                    |
-| `Ctrl+G`     | Switch to Control tab (Governance)      |
-| `Tab`        | Next tab                                |
-| `Shift+Tab`  | Previous tab                            |
-| `Enter`      | Select / confirm                        |
-| `Esc`        | Back / cancel search                    |
-| `r`          | Refresh current tab                     |
-| `f`          | Fork session (Sessions tab)             |
-| `y`          | Copy to clipboard                       |
-| `s`          | Sort (Skills tab)                       |
-| `o`          | Open in browser (Skills tab)            |
-| `/`          | Focus search                            |
-| `?`          | Which-key help overlay                  |
-| `q`          | Quit                                    |
-
-#### Control tab keys
-
-| Key | Action                                         |
-|-----|------------------------------------------------|
-| `r` | Reload budgets and denials from disk           |
-| `e` | Open `policy.toml` in `$EDITOR`               |
-| `c` | Clear denial log                               |
-
-## Control Plane (Phase 2)
-
-`tonys-agent-telemetry` can enforce runtime policies on your Claude Code sessions:
-- Per-session and per-day USD budget caps
-- Tool allowlists/denylists (e.g., block `rm -rf` globally)
-- Live observability of budget burn-down
-
-Configure via `~/.config/tonys-agent-telemetry/policy.toml`. See [example policy](./examples/policy.toml).
-
-When a policy violation triggers, the hook returns exit code 2 to Claude Code,
-which surfaces the denial message to the model as a tool error. The agent
-typically reacts by trying a different approach or asking for guidance.
-
-Press `Ctrl+G` to view the Control tab with live budget bars and denial log.
-
-## Telemetry sinks & replay (Phase 4)
-
-Every span collected by the auto-detected providers can be forwarded,
-recorded, or replayed via CLI flags. The producing pipeline is never
-blocked: each branch has its own buffer and slow consumers drop rather
-than backpressure the source.
+### Pre-built tarball
 
 ```sh
-# Forward spans to a remote OTLP/JSON receiver (Tempo, Honeycomb, Langfuse, ...).
-tonys-agent-telemetry --otlp-export http://tempo:4318/v1/traces
-
-# Record every span to a local file for later inspection.
-tonys-agent-telemetry --snapshot-record /tmp/agents-2026-05-25.jsonl
-
-# Replay a recorded session into the TUI (live providers are disabled).
-tonys-agent-telemetry --replay /tmp/agents-2026-05-25.jsonl
-
-# Extract behavioral signals from spans (stalled_node, duplicate_subagent_work,
-# unused_installed_skill, failed_handoff) as JSON. Combine with --replay to
-# analyse a recorded session offline.
-tonys-agent-telemetry --emit-signals --replay /tmp/agents-2026-05-25.jsonl
+gh release download v0.1.0 -p '*linux_amd64.tar.gz' --repo vanillacake369/tonys-agent-telemetry
+tar -xzf tonys-agent-telemetry_*.tar.gz tonys-agent-telemetry
+sudo mv tonys-agent-telemetry /usr/local/bin/
 ```
 
-Env vars `TAT_OTLP_EXPORT` and `TAT_SNAPSHOT_RECORD` provide the same
-behavior without CLI flags.
+### From source (`go install`)
 
-### Environment variables
-
-| Var | Purpose | Default |
-|---|---|---|
-| `TONYS_OTLP_BIND` | OTLP receiver bind address (opt in to LAN with `0.0.0.0:4318`) | `127.0.0.1:4318` |
-| `TONYS_MAX_SPANS` | Span buffer cap in the TUI | `50000` |
-| `TONYS_SIGNAL_STORE` | Override signal store directory | `$XDG_CACHE_HOME/tonys-agent-telemetry/signals/` |
-| `TONYS_CATALOG_PATH` | Override catalog cache JSON path | `$XDG_CACHE_HOME/tonys-agent-telemetry/catalog/items.json` |
-| `TONYS_CATALOG_MIN` | Minimum viable catalog entries before Skills tab renders the corpus pane | `100` |
-| `TONYS_LIVE_UPSTREAM` | Opt in to the live-upstream catalog smoke test | unset |
-| `NO_COLOR` | Standard — disables ANSI color (status still distinguishable via `✓`/`▶`/`✗`) | unset |
-
-### Plugin SDK — the OTLP receiver IS the plugin interface
-
-Any process that emits OTLP/JSON spans to `http://localhost:4318/v1/traces`
-is automatically ingested into the same pipeline as the native providers.
-No Go-plugin loading, no custom protocol — just standard OTel export.
-
-Examples:
+Requires Go 1.26+. The pre-built binaries do not — they ship as
+`CGO_ENABLED=0` static binaries.
 
 ```sh
-# Python agent using OpenLLMetry → exports to our receiver
-OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318 \
-  python my_langgraph_agent.py
+go install github.com/vanillacake369/tonys-agent-telemetry@latest
 ```
 
-```sh
-# LiteLLM proxy → emits per-request spans for any model it routes
-litellm --otel-export-url http://localhost:4318
-```
-
-This is why no LiteLLM-style proxy is built into this binary: LiteLLM
-already emits OTLP and pointing its exporter here gives you the same
-visibility plus LiteLLM's routing/cost-tracking on top.
+[rel]: https://github.com/vanillacake369/tonys-agent-telemetry/releases/latest
 
 ## Verifying release artefacts
 
-Every tagged release ships with:
-
-- **Cosign keyless signatures** — each archive, Linux package, checksums file, and SBOM has a sibling `.sig` (signature) and `.pem` (Fulcio certificate).
-- **SLSA L3 provenance** — `tonys-agent-telemetry.intoto.jsonl` in the release lists every artefact, the source commit, and the workflow that built it.
-
-Verify a downloaded binary:
+Every tagged release ships with cosign keyless signatures and SLSA L3
+provenance. Verify in one block:
 
 ```sh
-# 1. Cosign signature (no key needed — verifies via GH Actions OIDC identity).
-cosign verify-blob \
-  --certificate tonys-agent-telemetry_linux_amd64.tar.gz.pem \
-  --signature   tonys-agent-telemetry_linux_amd64.tar.gz.sig \
-  --certificate-identity-regexp '^https://github\.com/vanillacake369/tonys-agent-telemetry/' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  tonys-agent-telemetry_linux_amd64.tar.gz
+ARTIFACT=tonys-agent-telemetry_linux_amd64.tar.gz
 
-# 2. SLSA provenance.
+cosign verify-blob \
+  --certificate "${ARTIFACT}.pem" \
+  --signature   "${ARTIFACT}.sig" \
+  --certificate-identity-regexp \
+    '^https://github\.com/vanillacake369/tonys-agent-telemetry/\.github/workflows/release\.yml@refs/tags/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  "${ARTIFACT}"
+
 slsa-verifier verify-artifact \
   --provenance-path tonys-agent-telemetry.intoto.jsonl \
   --source-uri github.com/vanillacake369/tonys-agent-telemetry \
-  tonys-agent-telemetry_linux_amd64.tar.gz
+  "${ARTIFACT}"
 ```
 
-## For contributors
+Full threat model, supported versions, and reporting process live in
+[`SECURITY.md`](./SECURITY.md).
+
+## CLI flags
 
 ```sh
-# One-time hook install per clone — runs gofmt + vet + short tests on
-# every commit and enforces Conventional Commits subject lines.
-make hooks-install
-
-# Local pre-PR checks (matches what CI gates on).
-make ci
+tonys-agent-telemetry --otlp-export <url>      # forward spans to a remote OTLP/JSON receiver
+tonys-agent-telemetry --snapshot-record <file> # append every span to JSONL for replay
+tonys-agent-telemetry --replay <file>          # replay JSONL instead of starting providers
+tonys-agent-telemetry --emit-signals --replay <file> | jq   # extract signals as JSON, exit
 ```
 
-## Claude Code integration
+`TAT_OTLP_EXPORT` and `TAT_SNAPSHOT_RECORD` env vars are equivalent to
+the matching flags.
 
-`tonys-agent-telemetry` reads Claude Code activity directly from the JSONL files under `~/.claude/projects/` — no hook installation required. Provider auto-detection (see Features) picks up sessions as they accumulate; the DAG / Sessions / Skills tabs reflect them on the next refresh.
+Full flag + env var reference (including `TONYS_OTLP_BIND`,
+`TONYS_MAX_SPANS`, `TONYS_SIGNAL_STORE`, `TONYS_CATALOG_PATH`,
+`TONYS_CATALOG_MIN`, `NO_COLOR`, `TAT_DEBUG`) and every TUI key binding
+in [`docs/cli-reference.md`](./docs/cli-reference.md).
 
-Live OTLP-style ingest from other agent runtimes (LangGraph, CrewAI, LiteLLM, vLLM, etc.) is supported via the OTLP receiver on `127.0.0.1:4318` (configurable with `TONYS_OTLP_BIND`). See [Telemetry sinks & replay](#telemetry-sinks--replay-phase-4).
+## Where to go next
 
-> Note: the standalone `tonys-agent-telemetry-hook` binary used in earlier versions to bridge Claude Code hooks into a FIFO has been removed. The Control tab now reads policy state and budgets from disk for visualisation; runtime tool-call enforcement against Claude Code is no longer wired through this binary.
+- **First-time UX** — [`docs/faq.md`](./docs/faq.md) — "what is this, what is it not".
+- **Stuck?** — [`docs/troubleshooting.md`](./docs/troubleshooting.md) — first-launch empty state, OTLP port conflicts, Docker bridge, offline catalog, cosign verification failures.
+- **Contributing** — [`CONTRIBUTING.md`](./CONTRIBUTING.md) — dev setup, commit conventions, AI-assistance disclosure.
+- **Internals** — [`docs/architecture.md`](./docs/architecture.md) — package map, data flow, contracts that matter, fidelity tier model.
+- **Changelog** — [`CHANGELOG.md`](./CHANGELOG.md) — what shipped in each release.
+- **Security** — [`SECURITY.md`](./SECURITY.md) — vulnerability reporting + artefact verification.
 
-## Architecture
+## Acknowledgements
 
-```
-.
-├── main.go                    # TUI entry point + CLI flags (--emit-signals, --replay, ...)
-└── internal/
-    ├── catalog/               # Best-practice corpus ingest (markdown parser + cache + fetcher)
-    ├── control/               # Policy loading, budget store, denial log, decision engine
-    ├── data/                  # Session/agent data loading (JSONL parser, models)
-    ├── event/                 # Real-time event types + FIFO consumer (read-side)
-    ├── platform/              # OS detection, clipboard, terminal utilities
-    ├── provider/              # Multi-provider ingest: claudecode / otlp / vllm / ollama
-    ├── recommender/           # Evidence-backed Recommendation engine (mapping + scoring)
-    ├── signal/                # Signal Extractor v0 (4 detectors against telemetry forest)
-    ├── signalstore/           # JSONL signal persistence with flock + rotation
-    ├── skill/                 # Local skill scan + GitHub fetch + cache
-    ├── snapshot/              # Span snapshot record/replay
-    ├── telemetry/             # Canonical Span + Forest builders
-    ├── trends/                # Time-series Bucket aggregation
-    └── tui/                   # Bubbletea TUI: app, 7 tabs, DAG renderer, advisor/trends wiring
-```
+Built on the excellent [bubbletea][bt] / [lipgloss][lg] / [bubbles][bb]
+stack by [Charm](https://charm.sh). Catalog data from
+[FlorianBruniaux/claude-code-ultimate-guide][cug] (CC-BY-SA-4.0).
+Release pipeline uses [goreleaser][grl], [cosign][cs], and the
+[SLSA framework][slsa].
 
-### Key packages
-
-- `internal/control` — policy TOML loading (fail-open), budget accumulation with flock, denial JSONL log, decision engine
-- `internal/data` — reads `~/.claude/projects/**/*.jsonl` session files and agent metadata
-- `internal/event` — non-blocking FIFO write with timeout; silent no-op when TUI is not running
-- `internal/skill` — local skill scanner + GitHub API fetcher with disk cache
-- `internal/tui` — five-tab Bubbletea application; DAG renderer for agent orchestration graphs
-
-## Requirements
-
-- Go 1.26+ (for building from source)
-- `gh` (optional) — used by the Skills tab for authenticated GitHub API calls
-- `fzf` (optional) — enhanced fuzzy search in Sessions tab
+[bt]: https://github.com/charmbracelet/bubbletea
+[lg]: https://github.com/charmbracelet/lipgloss
+[bb]: https://github.com/charmbracelet/bubbles
+[cug]: https://github.com/FlorianBruniaux/claude-code-ultimate-guide
+[grl]: https://goreleaser.com
+[cs]: https://github.com/sigstore/cosign
+[slsa]: https://slsa.dev
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](./LICENSE).

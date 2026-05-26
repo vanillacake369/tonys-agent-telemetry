@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Manual trigger so docs-only commits (or any ref update applied via
+  # gh api PATCH, which seems to skip the push event) can still be
+  # verified against the full matrix via `gh workflow run ci.yml`.
+  workflow_dispatch:
 
 jobs:
   lint:
