@@ -11,10 +11,11 @@ TUI dashboard for Claude Code sessions, agents, DAG visualization, and skill mar
 ## Features
 
 - **Sessions** — Fuzzy-find and resume past Claude Code sessions; fork or continue any session
-- **Skills** — Search the skill marketplace (local and GitHub-sourced skills with fuzzy filtering)
+- **Skills** — Local + GitHub skill search **plus** a best-practice catalog (181 entries from `FlorianBruniaux/claude-code-ultimate-guide`, CC-BY-SA-4.0) **plus** an Advisor pane that recommends skills based on signals extracted from your real session activity, with `(SignalID, CatalogItemID)` dual citation on every recommendation
 - **Cost** — Aggregated cost/usage dashboard by provider, model, project
 - **Hooks** — Visualize Claude Code hook configuration (`~/.claude/settings.json`) with workflow diagram
-- **DAG** — Live agent orchestration graph across all detected providers (Claude Code, vLLM, Ollama, anything OTel-emitting)
+- **DAG** — Live agent orchestration graph across all detected providers (Claude Code, vLLM, Ollama, anything OTel-emitting), with provider badges, status colors, in-graph `/`-search, and tmux/zellij-safe dynamic resize
+- **Trends** — Longitudinal signal sparklines (`▁▂▃▄▅▆▇█`) with per-signal-type Start/Last/Δ vs avg, fed by automatic 5-minute flushes to a local signal store (JSONL with flock + auto-rotation)
 - **Control** — Runtime governance: per-session/per-day USD budget caps, tool allow/denylists, live denial log
 
 ### Auto-detected providers (Phase 3)
@@ -81,6 +82,7 @@ tonys-agent-telemetry --version
 | `3`          | Switch to Cost tab                      |
 | `4`          | Switch to Hooks tab                     |
 | `5`          | Switch to DAG tab                       |
+| `6`          | Switch to Trends tab                    |
 | `Ctrl+G`     | Switch to Control tab (Governance)      |
 | `Tab`        | Next tab                                |
 | `Shift+Tab`  | Previous tab                            |
@@ -134,10 +136,27 @@ tonys-agent-telemetry --snapshot-record /tmp/agents-2026-05-25.jsonl
 
 # Replay a recorded session into the TUI (live providers are disabled).
 tonys-agent-telemetry --replay /tmp/agents-2026-05-25.jsonl
+
+# Extract behavioral signals from spans (stalled_node, duplicate_subagent_work,
+# unused_installed_skill, failed_handoff) as JSON. Combine with --replay to
+# analyse a recorded session offline.
+tonys-agent-telemetry --emit-signals --replay /tmp/agents-2026-05-25.jsonl
 ```
 
 Env vars `TAT_OTLP_EXPORT` and `TAT_SNAPSHOT_RECORD` provide the same
 behavior without CLI flags.
+
+### Environment variables
+
+| Var | Purpose | Default |
+|---|---|---|
+| `TONYS_OTLP_BIND` | OTLP receiver bind address (opt in to LAN with `0.0.0.0:4318`) | `127.0.0.1:4318` |
+| `TONYS_MAX_SPANS` | Span buffer cap in the TUI | `50000` |
+| `TONYS_SIGNAL_STORE` | Override signal store directory | `$XDG_CACHE_HOME/tonys-agent-telemetry/signals/` |
+| `TONYS_CATALOG_PATH` | Override catalog cache JSON path | `$XDG_CACHE_HOME/tonys-agent-telemetry/catalog/items.json` |
+| `TONYS_CATALOG_MIN` | Minimum viable catalog entries before Skills tab renders the corpus pane | `100` |
+| `TONYS_LIVE_UPSTREAM` | Opt in to the live-upstream catalog smoke test | unset |
+| `NO_COLOR` | Standard — disables ANSI color (status still distinguishable via `✓`/`▶`/`✗`) | unset |
 
 ### Plugin SDK — the OTLP receiver IS the plugin interface
 

@@ -287,13 +287,25 @@ Flags:
   --snapshot-record FILE   Append every span to FILE for later replay
                            (also via TAT_SNAPSHOT_RECORD env)
   --replay FILE            Read spans from FILE instead of live providers
+  --emit-signals           Extract signals (stalled_node, duplicate_subagent_work,
+                           unused_installed_skill, failed_handoff) from the
+                           ingested spans and print as JSON to stdout, then exit.
+                           Combine with --replay to analyse a recorded session.
 
-Tabs (1-5 + Ctrl+G):
+Environment:
+  TONYS_OTLP_BIND          OTLP receiver bind addr (default 127.0.0.1:4318)
+  TONYS_MAX_SPANS          Span buffer cap in the TUI (default 50000)
+  TONYS_SIGNAL_STORE       Override the signal store directory
+  TONYS_CATALOG_PATH       Override the best-practice catalog cache path
+  TONYS_CATALOG_MIN        Minimum viable catalog entries (default 100)
+
+Tabs (1-6 + Ctrl+G):
   Sessions  Browse & resume Claude Code sessions
-  Skills    Search the skill marketplace
+  Skills    Skill marketplace + catalog + Advisor (evidence-backed recs)
   Cost      Cost/usage by provider, model, project
   Hooks     Visualize ~/.claude/settings.json hook config
   DAG       Live agent orchestration graph (all providers)
+  Trends    Longitudinal signal counts (sparkline + Δ vs avg per signal type)
   Control   Runtime governance (Ctrl+G): budget caps + tool deny/allowlist
 `)
 }
