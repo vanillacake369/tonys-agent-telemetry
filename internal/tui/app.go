@@ -67,8 +67,25 @@ func cycleTab(current Tab, delta int) Tab {
 }
 
 // TabModel is the interface that every tab sub-model must implement.
-// SetSize returns the updated model (value-receiver implementations must
-// return their updated copy so the caller can store it).
+//
+// Contract (hard-enforced by App.View via clipContentToHeight):
+//
+//   - View() MUST return a string whose visible row count does not exceed
+//     the height most recently passed to SetSize. Returning more rows
+//     causes the App to drop the bottom rows of the tab's output so the
+//     tab bar and outer border stay on-screen — the data shown to the
+//     user will be silently truncated. Treat any clip-warning seen in
+//     test output as a real bug.
+//   - View() MUST NOT return any line wider than the width most recently
+//     passed to SetSize. Wider lines wrap and consume extra rows.
+//   - SetSize returns the updated model (value-receiver implementations
+//     must return their updated copy so the caller can store it).
+//
+// This contract exists because the user's terminal cannot render rows
+// past `height`. If a tab overflows, the user's terminal crops the top,
+// hiding the tab bar — that was the F-bar bug pattern. App.View now
+// hard-clips at the safety net but tabs SHOULD also self-budget so
+// nothing important is lost.
 type TabModel interface {
 	Init() tea.Cmd
 	Update(msg tea.Msg) (TabModel, tea.Cmd)
@@ -436,10 +453,18 @@ func (a App) View() string {
 	innerW := max(0, a.width-outerBorderWidth)
 
 	tabBar := renderTabBar(a.activeTab, innerW)
+
+	// Hard-clip the tab's rendered output to the available content height.
+	// Without this safety net, a tab whose View() overflows pushes the
+	// outer border down, which the user's terminal then crops at the top —
+	// hiding the tab bar. See TabModel contract docs.
+	rawContent := a.tabs[a.activeTab].View()
+	rawContent = clipContentToHeight(rawContent, a.contentHeight())
+
 	content := ContentStyle.
 		Width(innerW).
 		Height(a.contentHeight()).
-		Render(a.tabs[a.activeTab].View())
+		Render(rawContent)
 	statusBar := a.renderStatusBar(innerW)
 
 	inner := strings.Join([]string{tabBar, content, statusBar}, "\n")
@@ -483,6 +508,24 @@ func (a App) contentHeight() int {
 		return 0
 	}
 	return h
+}
+
+// clipContentToHeight is the App-level safety net for the TabModel
+// contract. If a tab's View() returns more rows than the available
+// content height, drop the BOTTOM rows so the tab bar (which is rendered
+// above this content) and the outer border below stay visible. The user
+// loses some tab content but never loses navigation chrome.
+//
+// Returns the original string unchanged when content already fits.
+func clipContentToHeight(s string, maxH int) string {
+	if maxH <= 0 {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= maxH {
+		return s
+	}
+	return strings.Join(lines[:maxH], "\n")
 }
 
 // propagateSize distributes the current terminal dimensions to every tab model.
