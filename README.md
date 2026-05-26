@@ -62,7 +62,6 @@ Download the latest release from [GitHub Releases](https://github.com/vanillacak
 ```sh
 tar -xzf tonys-agent-telemetry_linux_amd64.tar.gz
 mv tonys-agent-telemetry /usr/local/bin/
-mv tonys-agent-telemetry-hook /usr/local/bin/
 ```
 
 ## Usage
@@ -181,57 +180,34 @@ This is why no LiteLLM-style proxy is built into this binary: LiteLLM
 already emits OTLP and pointing its exporter here gives you the same
 visibility plus LiteLLM's routing/cost-tracking on top.
 
-## Hook Setup
+## Claude Code integration
 
-`tonys-agent-telemetry` receives live events from Claude Code via a named FIFO at `/tmp/tonys-agent-telemetry.fifo`.
+`tonys-agent-telemetry` reads Claude Code activity directly from the JSONL files under `~/.claude/projects/` — no hook installation required. Provider auto-detection (see Features) picks up sessions as they accumulate; the DAG / Sessions / Skills tabs reflect them on the next refresh.
 
-Install the hook handler binary, then register it in your Claude Code hooks configuration (`~/.claude/settings.json`):
+Live OTLP-style ingest from other agent runtimes (LangGraph, CrewAI, LiteLLM, vLLM, etc.) is supported via the OTLP receiver on `127.0.0.1:4318` (configurable with `TONYS_OTLP_BIND`). See [Telemetry sinks & replay](#telemetry-sinks--replay-phase-4).
 
-```json
-{
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "tonys-agent-telemetry-hook PostToolUse"
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "tonys-agent-telemetry-hook PreToolUse"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-The hook handler reads the JSON payload from stdin and writes it to the FIFO. It always exits 0 to never block Claude Code. If the TUI is not running the FIFO does not exist and the hook is a no-op.
+> Note: the standalone `tonys-agent-telemetry-hook` binary used in earlier versions to bridge Claude Code hooks into a FIFO has been removed. The Control tab now reads policy state and budgets from disk for visualisation; runtime tool-call enforcement against Claude Code is no longer wired through this binary.
 
 ## Architecture
 
 ```
 .
-├── main.go                    # TUI entry point; version injection target
-├── cmd/hook-handler/main.go   # Hook handler binary (stdin → FIFO + policy enforcement)
-├── examples/policy.toml       # Sample policy configuration
+├── main.go                    # TUI entry point + CLI flags (--emit-signals, --replay, ...)
 └── internal/
+    ├── catalog/               # Best-practice corpus ingest (markdown parser + cache + fetcher)
     ├── control/               # Policy loading, budget store, denial log, decision engine
     ├── data/                  # Session/agent data loading (JSONL parser, models)
-    ├── event/                 # FIFO write logic for real-time hook events
+    ├── event/                 # Real-time event types + FIFO consumer (read-side)
     ├── platform/              # OS detection, clipboard, terminal utilities
-    ├── skill/                 # Skill marketplace: local scan + GitHub fetch + cache
-    └── tui/                   # Bubbletea TUI: app, tabs, DAG renderer, styles, keymap
+    ├── provider/              # Multi-provider ingest: claudecode / otlp / vllm / ollama
+    ├── recommender/           # Evidence-backed Recommendation engine (mapping + scoring)
+    ├── signal/                # Signal Extractor v0 (4 detectors against telemetry forest)
+    ├── signalstore/           # JSONL signal persistence with flock + rotation
+    ├── skill/                 # Local skill scan + GitHub fetch + cache
+    ├── snapshot/              # Span snapshot record/replay
+    ├── telemetry/             # Canonical Span + Forest builders
+    ├── trends/                # Time-series Bucket aggregation
+    └── tui/                   # Bubbletea TUI: app, 7 tabs, DAG renderer, advisor/trends wiring
 ```
 
 ### Key packages

@@ -7,13 +7,13 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 help:
 	@echo "tonys-agent-telemetry — make targets"
 	@echo ""
-	@echo "  build       Build both binaries with version stamp"
+	@echo "  build       Build the tonys-agent-telemetry binary with version stamp"
 	@echo "  test        Run tests (no race detector)"
 	@echo "  test-race   Run tests with -race -count=1"
 	@echo "  vet         go vet ./..."
 	@echo "  lint        Alias for vet"
 	@echo "  ci          vet + race tests (used by CI)"
-	@echo "  install     go install both binaries to GOPATH/bin"
+	@echo "  install     go install the binary to GOPATH/bin"
 	@echo "  clean       Remove bin/, dist/, result"
 	@echo "  release-dry GoReleaser snapshot build"
 	@echo ""
@@ -21,7 +21,6 @@ help:
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/tonys-agent-telemetry .
-	go build -ldflags "-s -w" -o bin/tonys-agent-telemetry-hook ./cmd/hook-handler
 
 test:
 	go test -count=1 ./...
@@ -38,7 +37,6 @@ ci: vet test-race
 
 install:
 	go install -ldflags "$(LDFLAGS)" .
-	go install -ldflags "-s -w" ./cmd/hook-handler
 
 clean:
 	rm -rf bin/ dist/ result

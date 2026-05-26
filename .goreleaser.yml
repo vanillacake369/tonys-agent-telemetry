@@ -10,17 +10,9 @@ builds:
       - -s -w
       - -X main.version={{.Version}}
 
-  - id: hook-handler
-    main: ./cmd/hook-handler
-    binary: tonys-agent-telemetry-hook
-    goos: [linux, darwin]
-    goarch: [amd64, arm64]
-    ldflags:
-      - -s -w
-
 archives:
   - id: default
-    builds: [main, hook-handler]
+    builds: [main]
     format: tar.gz
     name_template: "tonys-agent-telemetry_{{ .Os }}_{{ .Arch }}"
 
@@ -34,3 +26,4 @@ changelog:
     exclude:
       - "^docs:"
       - "^test:"
+      - "^chore:"

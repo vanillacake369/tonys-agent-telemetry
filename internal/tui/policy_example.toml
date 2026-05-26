@@ -1,10 +1,13 @@
 # tonys-agent-telemetry policy.toml — example & reference
 #
-# This file is loaded by the hook-handler binary BEFORE every Claude Code
-# tool call. Missing/malformed files are tolerated (fail-open).
+# Loaded by the Control tab to display policy state, budget caps, and
+# denial-log contents. Missing/malformed files are tolerated (fail-open).
 #
 # Path: $XDG_CONFIG_HOME/tonys-agent-telemetry/policy.toml
 #       (typically ~/.config/tonys-agent-telemetry/policy.toml)
+#
+# Note: runtime enforcement against Claude Code hooks via a standalone
+# binary has been removed; this file is now read for visualisation only.
 
 [budget]
 # Hard cap per Claude Code session (USD). 0 = unlimited.

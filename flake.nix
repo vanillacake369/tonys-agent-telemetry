@@ -19,7 +19,7 @@
             src = ./.;
             vendorHash = "sha256-abS9Oz46kVFZk63vEm8fAVb/zMhwsMAKbdioU6FRVRw=";
 
-            subPackages = [ "." "cmd/hook-handler" ];
+            subPackages = [ "." ];
 
             ldflags = [
               "-s" "-w"
@@ -29,9 +29,6 @@
             nativeBuildInputs = [ pkgs.makeWrapper ];
 
             postInstall = ''
-              # Rename hook-handler binary for clarity
-              mv $out/bin/hook-handler $out/bin/tonys-agent-telemetry-hook
-
               # Wrap main binary with optional gh in PATH
               wrapProgram $out/bin/tonys-agent-telemetry \
                 --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.gh ]}
