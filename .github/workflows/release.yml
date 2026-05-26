@@ -25,7 +25,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: 'stable'
 
       # Cosign for keyless signing (signs: block in .goreleaser.yml).
       - uses: sigstore/cosign-installer@v3
@@ -42,6 +42,11 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # External-repo Homebrew tap push needs a PAT. If the secret is
+          # absent, the .goreleaser.yml conditional sets skip_upload=true
+          # for the brews block — formula is still produced locally as an
+          # artifact, the push is just suppressed.
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
           # COSIGN_EXPERIMENTAL is not strictly required on cosign v2
           # keyless, but documents the OIDC-driven signing path explicitly.
           COSIGN_EXPERIMENTAL: '1'
