@@ -46,20 +46,40 @@ var tabNames = map[Tab]string{
 	TabTrends:   "Trends",
 }
 
-// tabOrder defines the left-to-right display order of tabs.
-// SSoT: cycleTab and renderTabBar both derive from this slice so adding a new
-// tab requires editing one place, not three.
-var tabOrder = []Tab{TabSessions, TabSkills, TabCost, TabHooks, TabDAG, TabControl, TabTrends}
+// tabOrder defines the left-to-right display order of the NUMBERED tabs
+// (1-6) — the ones reachable via Tab/Shift+Tab cycling and direct number
+// keys. Control is intentionally NOT in this slice: it's a special
+// governance tab accessed via Ctrl+G only, separate from the normal
+// cycle. renderTabBar appends "^G:Control" after iterating tabOrder.
+//
+// SSoT: adding a new NUMBERED tab requires editing this slice and the
+// const block above. Adding a special-keybinding tab (like Control)
+// requires touching renderTabBar's tabDefs and the key handler.
+var tabOrder = []Tab{TabSessions, TabSkills, TabCost, TabHooks, TabDAG, TabTrends}
 
 // cycleTab returns the tab `delta` steps from `current` in tabOrder, wrapping.
-// delta = +1 advances, delta = -1 goes back. Used by NextTab/PrevTab handlers.
+// delta = +1 advances, delta = -1 goes back. Used by NextTab/PrevTab.
+//
+// If the user is currently on a tab outside tabOrder (i.e. TabControl
+// reached via Ctrl+G), Tab/Shift+Tab returns them to the start of the
+// numbered cycle rather than refusing to navigate.
 func cycleTab(current Tab, delta int) Tab {
-	idx := 0
+	idx := -1
 	for i, t := range tabOrder {
 		if t == current {
 			idx = i
 			break
 		}
+	}
+	if idx == -1 {
+		// Current tab is outside the cycle (e.g. TabControl via Ctrl+G).
+		// Treat the cycle as starting one before TabSessions so that
+		// pressing Tab lands on TabSessions and Shift+Tab lands on the
+		// last numbered tab.
+		if delta >= 0 {
+			return tabOrder[0]
+		}
+		return tabOrder[len(tabOrder)-1]
 	}
 	n := len(tabOrder)
 	next := (idx + delta + n) % n

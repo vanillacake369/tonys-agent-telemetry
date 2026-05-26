@@ -73,9 +73,11 @@ func TestApp_TabSwitchingRoundTrip(t *testing.T) {
 
 func TestApp_TabCyclingWithTabKey(t *testing.T) {
 	a := NewApp()
-	// Tab key cycles through tabOrder forward, wrapping back to Sessions.
-	// Sessions → Skills → Cost → Hooks → DAG → Control → Trends → Sessions.
-	expected := []Tab{TabSkills, TabCost, TabHooks, TabDAG, TabControl, TabTrends, TabSessions}
+	// Tab key cycles through the NUMBERED tabs only (1-6). Control is
+	// intentionally excluded — it's a special governance tab reached via
+	// Ctrl+G, not part of the normal cycle.
+	// Sessions → Skills → Cost → Hooks → DAG → Trends → Sessions.
+	expected := []Tab{TabSkills, TabCost, TabHooks, TabDAG, TabTrends, TabSessions}
 	for i, want := range expected {
 		a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyTab})
 		if a.activeTab != want {
@@ -86,9 +88,9 @@ func TestApp_TabCyclingWithTabKey(t *testing.T) {
 
 func TestApp_TabCyclingWithShiftTabKey(t *testing.T) {
 	a := NewApp()
-	// Shift+Tab cycles through tabOrder backward, wrapping forward to Sessions.
-	// Sessions ← Trends ← Control ← DAG ← Hooks ← Cost ← Skills ← Sessions.
-	expected := []Tab{TabTrends, TabControl, TabDAG, TabHooks, TabCost, TabSkills, TabSessions}
+	// Shift+Tab cycles backward through the numbered tabs only.
+	// Sessions ← Trends ← DAG ← Hooks ← Cost ← Skills ← Sessions.
+	expected := []Tab{TabTrends, TabDAG, TabHooks, TabCost, TabSkills, TabSessions}
 	for i, want := range expected {
 		a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyShiftTab})
 		if a.activeTab != want {
@@ -97,10 +99,42 @@ func TestApp_TabCyclingWithShiftTabKey(t *testing.T) {
 	}
 }
 
-// TestApp_TabCyclingCoversAllTabs asserts that pressing Tab len(tabOrder)
-// times visits every tab exactly once and returns to the starting tab.
-// Regression guard for QA finding V-1 (tab cycling silently skipping new tabs).
-func TestApp_TabCyclingCoversAllTabs(t *testing.T) {
+// TestApp_TabCyclingExcludesControl asserts Control is NEVER reached by
+// Tab/Shift+Tab cycling — only by the dedicated Ctrl+G keybind.
+func TestApp_TabCyclingExcludesControl(t *testing.T) {
+	a := NewApp()
+	for i := 0; i < 20; i++ { // way more than tabOrder length
+		a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyTab})
+		if a.activeTab == TabControl {
+			t.Fatalf("Tab cycle reached TabControl after %d presses — Control must be Ctrl+G only", i+1)
+		}
+	}
+}
+
+// TestApp_TabCyclingFromControl_ReturnsToCycle asserts that if a user is
+// on Control (reached via Ctrl+G) and then presses Tab, navigation
+// returns them to the start of the numbered cycle rather than getting
+// stuck.
+func TestApp_TabCyclingFromControl_ReturnsToCycle(t *testing.T) {
+	a := NewApp()
+	a.activeTab = TabControl
+
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyTab})
+	if a.activeTab != TabSessions {
+		t.Errorf("Tab from Control: activeTab = %d, want TabSessions (%d)", a.activeTab, TabSessions)
+	}
+
+	a.activeTab = TabControl
+	a, _ = updateApp(t, a, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if a.activeTab != TabTrends {
+		t.Errorf("Shift+Tab from Control: activeTab = %d, want TabTrends (%d)", a.activeTab, TabTrends)
+	}
+}
+
+// TestApp_TabCyclingCoversAllNumberedTabs asserts that pressing Tab
+// len(tabOrder) times visits every numbered tab exactly once and returns
+// to TabSessions. Regression guard for V-1 (tabs silently skipped).
+func TestApp_TabCyclingCoversAllNumberedTabs(t *testing.T) {
 	a := NewApp()
 	seen := map[Tab]bool{a.activeTab: true}
 	for i := 0; i < len(tabOrder); i++ {
@@ -108,10 +142,13 @@ func TestApp_TabCyclingCoversAllTabs(t *testing.T) {
 		seen[a.activeTab] = true
 	}
 	if len(seen) != len(tabOrder) {
-		t.Errorf("Tab cycling covered %d distinct tabs, want %d (one per tabOrder entry)", len(seen), len(tabOrder))
+		t.Errorf("Tab cycling covered %d distinct tabs, want %d (one per numbered tab)", len(seen), len(tabOrder))
 	}
 	if a.activeTab != TabSessions {
 		t.Errorf("after %d Tab presses, activeTab = %d, want TabSessions (%d)", len(tabOrder), a.activeTab, TabSessions)
+	}
+	if seen[TabControl] {
+		t.Errorf("Tab cycle visited TabControl — must be Ctrl+G only")
 	}
 }
 
