@@ -27,8 +27,8 @@ type HooksConfig struct {
 
 // HookGroup represents a matcher + list of hooks for a given event.
 type HookGroup struct {
-	Matcher string       `json:"matcher"`
-	Hooks   []HookEntry  `json:"hooks"`
+	Matcher string      `json:"matcher"`
+	Hooks   []HookEntry `json:"hooks"`
 }
 
 // HookEntry is a single hook command definition.

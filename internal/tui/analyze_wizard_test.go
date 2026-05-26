@@ -667,7 +667,7 @@ func TestAnalyzeWizard_AnalyzeExecuteMsg_ModelMatchesSelection(t *testing.T) {
 
 	// Move to second model then Enter.
 	w, _ = updateWizard(t, w, tea.KeyMsg{Type: tea.KeyDown})
-	w, _ = updateWizard(t, w, tea.KeyMsg{Type: tea.KeyEnter}) // advance to prompt
+	w, _ = updateWizard(t, w, tea.KeyMsg{Type: tea.KeyEnter})    // advance to prompt
 	_, cmd := updateWizard(t, w, tea.KeyMsg{Type: tea.KeyEnter}) // execute
 
 	if cmd == nil {

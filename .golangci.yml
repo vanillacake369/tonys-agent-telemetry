@@ -1,0 +1,54 @@
+# golangci-lint config — used by the pre-commit hook (when installed) and
+# by the CI lint job. Keep aligned with the project's house rules:
+# SRP/DRY/SSoT/Micro-Module + TDD. Linters are picked to ENFORCE those
+# without being noisy.
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck         # unhandled errors
+    - gofmt            # formatting
+    - goimports        # import grouping
+    - govet            # the usual
+    - ineffassign      # ineffective assignments
+    - staticcheck      # the staticcheck suite (replaces megacheck)
+    - unused           # unused identifiers
+    - misspell         # misspelled English in comments/identifiers
+    - gocyclo          # cyclomatic complexity
+    - gosec            # security checks (basic)
+    - prealloc         # slice preallocation hints
+
+linters-settings:
+  gocyclo:
+    min-complexity: 20  # generous; tab Update methods can reasonably hit ~15
+  misspell:
+    locale: US
+  govet:
+    enable:
+      - shadow
+  gosec:
+    excludes:
+      - G104  # ignored errors; errcheck covers it more precisely
+      - G304  # file path traversal; we read user-provided paths intentionally
+
+issues:
+  exclude-rules:
+    # Test files allow more leniency.
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+        - gocyclo
+    # SIGNALS_SPEC / PIVOT_PLAN style comments may have unusual spellings.
+    - source: "SIGNALS_SPEC|PIVOT_PLAN|MEMORY"
+      linters:
+        - misspell
+  exclude-dirs:
+    - dist
+    - bin
+  max-issues-per-linter: 0
+  max-same-issues: 0

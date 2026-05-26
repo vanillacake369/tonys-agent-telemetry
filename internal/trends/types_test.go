@@ -32,9 +32,9 @@ func TestBucket_Total(t *testing.T) {
 		Start:    time.Now(),
 		Duration: 24 * time.Hour,
 		Counts: map[signal.SignalType]int{
-			signal.SignalStalledNode:            3,
-			signal.SignalDuplicateSubagentWork:  2,
-			signal.SignalFailedHandoff:          1,
+			signal.SignalStalledNode:           3,
+			signal.SignalDuplicateSubagentWork: 2,
+			signal.SignalFailedHandoff:         1,
 		},
 		Sessions: 4,
 	}

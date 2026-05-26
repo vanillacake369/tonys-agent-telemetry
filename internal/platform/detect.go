@@ -19,14 +19,14 @@ const (
 type Emulator string
 
 const (
-	EmulatorWezTerm  Emulator = "wezterm"
-	EmulatorKitty    Emulator = "kitty"
-	EmulatorITerm2   Emulator = "iterm2"
+	EmulatorWezTerm   Emulator = "wezterm"
+	EmulatorKitty     Emulator = "kitty"
+	EmulatorITerm2    Emulator = "iterm2"
 	EmulatorAlacritty Emulator = "alacritty"
-	EmulatorGhostty  Emulator = "ghostty"
-	EmulatorVSCode   Emulator = "vscode"
-	EmulatorTerminal Emulator = "apple-terminal"
-	EmulatorUnknown  Emulator = "unknown"
+	EmulatorGhostty   Emulator = "ghostty"
+	EmulatorVSCode    Emulator = "vscode"
+	EmulatorTerminal  Emulator = "apple-terminal"
+	EmulatorUnknown   Emulator = "unknown"
 )
 
 // Multiplexer represents the terminal multiplexer type.

@@ -13,7 +13,7 @@ type hookPayload struct {
 	SessionID  string          `json:"sessionId"`
 	UUID       string          `json:"uuid"`
 	ParentUUID string          `json:"parentUuid"`
-	Type       string          `json:"type"`      // "user" | "assistant" | "queue-operation"
+	Type       string          `json:"type"` // "user" | "assistant" | "queue-operation"
 	CWD        string          `json:"cwd"`
 	GitBranch  string          `json:"gitBranch"`
 	Timestamp  string          `json:"timestamp"`

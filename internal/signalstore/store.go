@@ -55,7 +55,7 @@ type Store struct {
 
 // SnapshotEntry is the wire shape appended to a session file on each Append call.
 type SnapshotEntry struct {
-	CapturedAt time.Time      `json:"captured_at"`
+	CapturedAt time.Time       `json:"captured_at"`
 	Signals    []signal.Signal `json:"signals"`
 }
 

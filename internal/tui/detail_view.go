@@ -650,7 +650,6 @@ func (d *DetailView) buildMatchIndex() {
 	}
 }
 
-
 // softWrap wraps a single line of text to fit within maxWidth cells.
 func softWrap(s string, maxWidth int) string {
 	if maxWidth <= 0 {

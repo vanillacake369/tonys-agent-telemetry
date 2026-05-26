@@ -40,13 +40,13 @@ func TestResolveMinViable_EnvOverride(t *testing.T) {
 // negative numbers, and non-numeric strings all fall back to MinViableEntries.
 func TestResolveMinViable_InvalidEnvFallsBackToDefault(t *testing.T) {
 	invalidCases := []string{
-		"0",          // zero is invalid (threshold must be positive)
-		"-1",         // negative
-		"-100",       // negative large
-		"abc",        // non-numeric
-		"3.14",       // float (not a whole int)
-		"",           // empty (covered by default test but also valid here)
-		" ",          // whitespace only
+		"0",                      // zero is invalid (threshold must be positive)
+		"-1",                     // negative
+		"-100",                   // negative large
+		"abc",                    // non-numeric
+		"3.14",                   // float (not a whole int)
+		"",                       // empty (covered by default test but also valid here)
+		" ",                      // whitespace only
 		"9999999999999999999999", // overflow
 	}
 	for _, input := range invalidCases {

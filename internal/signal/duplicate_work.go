@@ -12,10 +12,10 @@ import (
 //
 // Complexity: O(K·M) where K is the number of siblings under each parent and
 // M is the max tool-list length, achieved by:
-//   1. Precomputing a multiset count-map for each sibling's tool sequence once: O(K·M).
-//   2. For each pair (i,j), computing intersection/union from the precomputed maps
-//      in O(min(|seqA|,|seqB|)) using one map-walk per pair: total O(K²·T) where
-//      T = distinct tool count. In practice K²·T << K·M for realistic fan-outs.
+//  1. Precomputing a multiset count-map for each sibling's tool sequence once: O(K·M).
+//  2. For each pair (i,j), computing intersection/union from the precomputed maps
+//     in O(min(|seqA|,|seqB|)) using one map-walk per pair: total O(K²·T) where
+//     T = distinct tool count. In practice K²·T << K·M for realistic fan-outs.
 //
 // This avoids the naïve O(K²·M) approach of re-walking both subtrees per pair.
 //

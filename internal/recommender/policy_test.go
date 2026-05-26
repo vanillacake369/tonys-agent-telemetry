@@ -129,7 +129,7 @@ func TestFilterEvidenced_StripsViolators(t *testing.T) {
 		CreatedAt:     time.Now(),
 	}
 	invalid := Recommendation{
-		SignalID:      "",      // missing
+		SignalID:      "", // missing
 		CatalogItemID: "cat-002",
 		Title:         "No signal",
 		Score:         0.5,

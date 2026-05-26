@@ -26,10 +26,10 @@ func ScanLocal() ([]Skill, error) {
 			if info, err := os.Stat(skillFile); err == nil {
 				desc := readFirstLine(skillFile)
 				skills = append(skills, Skill{
-					Name:      entry.Name(),
-					Source:    SourceLocal,
-					UpdatedAt: info.ModTime(),
-					CreatedAt: info.ModTime(),
+					Name:        entry.Name(),
+					Source:      SourceLocal,
+					UpdatedAt:   info.ModTime(),
+					CreatedAt:   info.ModTime(),
 					Description: desc,
 				})
 			}
@@ -145,4 +145,3 @@ func readFirstLine(path string) string {
 	}
 	return ""
 }
-

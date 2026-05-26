@@ -145,10 +145,10 @@ func TestBackfill_MalformedLineSkipped(t *testing.T) {
 func TestBackfill_SkipsRecordsWithoutTraceOrSpan(t *testing.T) {
 	fake := setupFakeClaude(t)
 	writeJSONL(t, filepath.Join(fake, "projects", "-p"), "s.jsonl", []string{
-		`{"type":"user"}`,                                   // no sessionId, no uuid
-		`{"sessionId":"s","type":"user"}`,                   // no uuid
-		`{"uuid":"u","type":"user"}`,                        // no sessionId
-		`{"sessionId":"s","uuid":"u","type":"user"}`,        // valid
+		`{"type":"user"}`,                            // no sessionId, no uuid
+		`{"sessionId":"s","type":"user"}`,            // no uuid
+		`{"uuid":"u","type":"user"}`,                 // no sessionId
+		`{"sessionId":"s","uuid":"u","type":"user"}`, // valid
 	})
 
 	out := make(chan telemetry.Span, 8)
@@ -173,7 +173,7 @@ func TestBackfill_ContextCancelStopsEmission(t *testing.T) {
 	writeJSONL(t, filepath.Join(fake, "projects", "-p"), "s.jsonl", lines)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel() // always release the context, even if the test fails early
+	defer cancel()                      // always release the context, even if the test fails early
 	out := make(chan telemetry.Span, 1) // small buffer so backfill blocks on send
 
 	done := make(chan error, 1)

@@ -24,9 +24,9 @@ func makeFiveBuckets() []trends.Bucket {
 			Sessions: 1,
 			Counts: map[signal.SignalType]int{
 				signal.SignalStalledNode:           counts[i],
-				signal.SignalFailedHandoff:          i % 3,
-				signal.SignalDuplicateSubagentWork:  i % 2,
-				signal.SignalUnusedInstalledSkill:   (4 - i) % 3,
+				signal.SignalFailedHandoff:         i % 3,
+				signal.SignalDuplicateSubagentWork: i % 2,
+				signal.SignalUnusedInstalledSkill:  (4 - i) % 3,
 			},
 		}
 	}

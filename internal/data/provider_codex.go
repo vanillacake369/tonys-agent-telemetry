@@ -58,11 +58,11 @@ type codexEventPayload struct {
 	Message string `json:"message"`
 	Info    *struct {
 		TotalTokenUsage struct {
-			InputTokens        int `json:"input_tokens"`
-			CachedInputTokens  int `json:"cached_input_tokens"`
-			OutputTokens       int `json:"output_tokens"`
-			ReasoningTokens    int `json:"reasoning_output_tokens"`
-			TotalTokens        int `json:"total_tokens"`
+			InputTokens       int `json:"input_tokens"`
+			CachedInputTokens int `json:"cached_input_tokens"`
+			OutputTokens      int `json:"output_tokens"`
+			ReasoningTokens   int `json:"reasoning_output_tokens"`
+			TotalTokens       int `json:"total_tokens"`
 		} `json:"total_token_usage"`
 	} `json:"info"`
 }
@@ -285,7 +285,9 @@ func (p *CodexProvider) ParseFullConversation(filePath string) ([]DetailTurn, er
 			var fc codexFunctionCall
 			if err := json.Unmarshal(cl.Payload, &fc); err == nil && fc.Type == "function_call" && fc.Name != "" {
 				tc := ToolCall{Name: fc.Name}
-				var args struct{ Arguments string `json:"arguments"` }
+				var args struct {
+					Arguments string `json:"arguments"`
+				}
 				_ = json.Unmarshal(cl.Payload, &args)
 				if args.Arguments != "" {
 					input := args.Arguments

@@ -36,9 +36,24 @@ func TestSplitChannel_DeliversAllSpansToAllBranches(t *testing.T) {
 	var tuiCount, exportCount, recordCount atomic.Int64
 	var wg sync.WaitGroup
 	wg.Add(3)
-	go func() { defer wg.Done(); for range tuiCh { tuiCount.Add(1) } }()
-	go func() { defer wg.Done(); for range exportCh { exportCount.Add(1) } }()
-	go func() { defer wg.Done(); for range recordCh { recordCount.Add(1) } }()
+	go func() {
+		defer wg.Done()
+		for range tuiCh {
+			tuiCount.Add(1)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range exportCh {
+			exportCount.Add(1)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range recordCh {
+			recordCount.Add(1)
+		}
+	}()
 
 	done := make(chan struct{})
 	go func() { wg.Wait(); close(done) }()

@@ -77,8 +77,8 @@ func TestDAGTab_EnterFromGraphOpensSpanDetail(t *testing.T) {
 	d := newDAGWith(t,
 		telemetry.Span{TraceID: "t1", SpanID: "a", System: "anthropic"},
 	)
-	d.Update(keyMsg("enter"))                  // → graph
-	tab, _ := d.Update(keyMsg("enter"))        // → span detail
+	d.Update(keyMsg("enter"))           // → graph
+	tab, _ := d.Update(keyMsg("enter")) // → span detail
 	d = tab.(*DAGTab)
 	if d.mode != dagViewSpan {
 		t.Errorf("mode = %d, want dagViewSpan", d.mode)

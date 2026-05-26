@@ -14,8 +14,8 @@ type mockIngestor struct {
 	ingestDone  chan struct{}
 }
 
-func (m *mockIngestor) ProviderID() string                  { return m.id }
-func (m *mockIngestor) Detect(ctx context.Context) bool     { return m.detect }
+func (m *mockIngestor) ProviderID() string              { return m.id }
+func (m *mockIngestor) Detect(ctx context.Context) bool { return m.detect }
 func (m *mockIngestor) Ingest(ctx context.Context, out chan<- Span) error {
 	m.ingestCalls.Add(1)
 	if m.ingestDone != nil {

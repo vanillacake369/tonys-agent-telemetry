@@ -16,7 +16,8 @@ const (
 // well item.Tags overlaps with candidateTags.
 //
 // Formula (one line):
-//   score = |intersect(item.Tags, candidateTags)| / |union(item.Tags, candidateTags)|
+//
+//	score = |intersect(item.Tags, candidateTags)| / |union(item.Tags, candidateTags)|
 //
 // Edge cases:
 //   - Empty intersection → 0.

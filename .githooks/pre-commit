@@ -1,0 +1,50 @@
+#!/usr/bin/env sh
+# tonys-agent-telemetry pre-commit hook.
+#
+# Install once per clone:
+#   git config core.hooksPath .githooks
+#
+# Runs the same checks CI does, on the changed Go files only, so an
+# obviously broken commit never lands. Add MORE checks here, not in a
+# separate wrapper — single source of truth.
+
+set -eu
+
+# Find staged Go files.
+STAGED_GO=$(git diff --cached --name-only --diff-filter=ACMR | grep '\.go$' || true)
+if [ -z "$STAGED_GO" ]; then
+	exit 0
+fi
+
+echo "→ gofmt -l"
+UNFORMATTED=$(gofmt -l $STAGED_GO || true)
+if [ -n "$UNFORMATTED" ]; then
+	echo "ERROR: the following files are not gofmt-clean:"
+	echo "$UNFORMATTED"
+	echo "Run: gofmt -w $UNFORMATTED"
+	exit 1
+fi
+
+echo "→ go vet ./..."
+if ! go vet ./... > /tmp/tat-vet-out 2>&1; then
+	cat /tmp/tat-vet-out
+	exit 1
+fi
+
+echo "→ go test -short -count=1 ./..."
+if ! go test -short -count=1 ./... > /tmp/tat-test-out 2>&1; then
+	tail -40 /tmp/tat-test-out
+	exit 1
+fi
+
+# Optional: golangci-lint if installed. Don't fail commit if not present;
+# CI is the authoritative gate.
+if command -v golangci-lint > /dev/null 2>&1; then
+	echo "→ golangci-lint run --fast"
+	if ! golangci-lint run --fast > /tmp/tat-lint-out 2>&1; then
+		cat /tmp/tat-lint-out
+		exit 1
+	fi
+fi
+
+exit 0

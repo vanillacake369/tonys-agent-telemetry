@@ -437,7 +437,7 @@ func TestStore_Concurrent_Appends_SerializeViaFlock(t *testing.T) {
 func TestStore_Append_RotatesAtMaxBytes(t *testing.T) {
 	dir := t.TempDir()
 	store := signalstore.NewStoreAt(dir)
-	signalstore.SetMaxFileBytesForTest(1) // trigger rotation after first write
+	signalstore.SetMaxFileBytesForTest(1)       // trigger rotation after first write
 	defer signalstore.SetMaxFileBytesForTest(0) // reset to production default
 
 	sig1 := makeSignal(signal.SignalStalledNode, "trace-rot-1")

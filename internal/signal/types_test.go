@@ -111,8 +111,8 @@ func TestSignal_JSONRoundTrip(t *testing.T) {
 // serializes as "[]" (empty array), never as JSON null.
 func TestSignal_SpanIDsNeverNil(t *testing.T) {
 	s := signal.Signal{
-		Type:    signal.SignalUnusedInstalledSkill,
-		SpanIDs: []string{},
+		Type:     signal.SignalUnusedInstalledSkill,
+		SpanIDs:  []string{},
 		Evidence: map[string]any{},
 	}
 	data, err := json.Marshal(s)

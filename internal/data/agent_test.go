@@ -124,9 +124,9 @@ func TestDiscoverAgents_NoFrontmatter(t *testing.T) {
 func TestDiscoverAgents_MultipleAgents(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]string{
-		"architect.md":  "---\nname: architect\ndescription: Plans things\nmodel: sonnet\n---\n",
+		"architect.md":   "---\nname: architect\ndescription: Plans things\nmodel: sonnet\n---\n",
 		"implementer.md": "---\nname: implementer\ndescription: Implements things\nmodel: opus\n---\n",
-		"reviewer.md":   "---\nname: reviewer\ndescription: Reviews things\n---\n",
+		"reviewer.md":    "---\nname: reviewer\ndescription: Reviews things\n---\n",
 	}
 	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {

@@ -54,9 +54,9 @@ type DAGTab struct {
 	mode dagViewMode
 
 	// trace-list state
-	traces       []traceEntry
-	traceCursor  int
-	traceOffset  int // scroll offset: index of first visible row
+	traces      []traceEntry
+	traceCursor int
+	traceOffset int // scroll offset: index of first visible row
 
 	// graph state (only meaningful when mode >= dagViewGraph)
 	activeTrace string
@@ -1092,8 +1092,8 @@ type gridPos struct {
 // link, top to bottom). Single ▼ arrow head replaces the inter-box gap.
 func drawChainConnector(grid [][]rune, parent, child gridPos, nodeW, nodeH, pitchX, pitchY int) {
 	mid := parent.col*pitchX + nodeW/2
-	yStart := parent.row*pitchY + nodeH       // first row below parent box
-	yEnd := child.row * pitchY                // first row of child box
+	yStart := parent.row*pitchY + nodeH // first row below parent box
+	yEnd := child.row * pitchY          // first row of child box
 	if yStart >= len(grid) || mid >= len(grid[0]) {
 		return
 	}

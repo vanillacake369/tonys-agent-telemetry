@@ -143,7 +143,7 @@ func TestCostTab_View_ContainsTotalCost(t *testing.T) {
 		t.Errorf("View() should contain cost (dollar sign), got:\n%s", view)
 	}
 	if !strings.Contains(view, "sessions") {
-		t.Errorf("View() should contain 'sessions' count", )
+		t.Errorf("View() should contain 'sessions' count")
 	}
 }
 

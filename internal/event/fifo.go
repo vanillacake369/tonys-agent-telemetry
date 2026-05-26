@@ -19,7 +19,7 @@ const (
 
 // Event represents a hook event received via FIFO.
 type Event struct {
-	HookType string          // "SessionStart", "PostToolUse", "SubagentStop", etc.
+	HookType string // "SessionStart", "PostToolUse", "SubagentStop", etc.
 	Payload  json.RawMessage
 }
 

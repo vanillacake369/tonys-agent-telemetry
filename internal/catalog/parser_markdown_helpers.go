@@ -11,7 +11,7 @@ var reSectionHeader = regexp.MustCompile(`^###\s+(\w[\w\s-]*?)\s+\(\d+\)$`)
 
 // reEntryHeader matches a linked catalog entry line:
 //
-//	- **[title](path/to/file.md)** *complexity* • time
+//   - **[title](path/to/file.md)** *complexity* • time
 //
 // Capture group 1 = title (slug), group 2 = path relative to examples/.
 var reEntryHeader = regexp.MustCompile(`^-\s+\*\*\[([^\]]+)\]\(([^)]+)\)\*\*`)

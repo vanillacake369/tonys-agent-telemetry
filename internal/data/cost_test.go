@@ -85,8 +85,8 @@ func assistantLineWithUsage(sessionID, model string, input, output, cacheRead, c
 		"timestamp": ts.Format(time.RFC3339Nano),
 		"sessionId": sessionID,
 		"message": map[string]interface{}{
-			"role":  "assistant",
-			"model": model,
+			"role":    "assistant",
+			"model":   model,
 			"content": content,
 			"usage": map[string]interface{}{
 				"input_tokens":                input,

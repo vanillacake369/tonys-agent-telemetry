@@ -1,0 +1,38 @@
+#!/usr/bin/env sh
+# Conventional Commits format check.
+# Accepts: feat|fix|chore|docs|test|refactor|perf|build|ci|style|revert
+# Optional scope in parentheses, optional "!" for breaking change.
+#
+# Examples:
+#   feat(signal): add new detector
+#   fix(tui): tab cycling skips Trends
+#   chore(release): bump v0.1.1
+
+set -eu
+
+MSG_FILE="$1"
+FIRST_LINE=$(head -1 "$MSG_FILE")
+
+# Allow merge commits.
+case "$FIRST_LINE" in
+	"Merge "*|"Revert "*|"Initial commit"*)
+		exit 0
+		;;
+esac
+
+PATTERN='^(feat|fix|chore|docs|test|refactor|perf|build|ci|style|revert)(\([a-z0-9./_-]+\))?!?: .+'
+
+if ! printf '%s\n' "$FIRST_LINE" | grep -qE "$PATTERN"; then
+	cat >&2 <<EOF
+ERROR: commit subject does not follow Conventional Commits.
+
+Got:    $FIRST_LINE
+Expect: <type>(scope)?!?: <subject>
+Types:  feat fix chore docs test refactor perf build ci style revert
+
+See https://www.conventionalcommits.org/
+EOF
+	exit 1
+fi
+
+exit 0

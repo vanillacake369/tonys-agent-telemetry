@@ -45,11 +45,11 @@ type rawUsage struct {
 
 // rawContentBlock is one element of a content array.
 type rawContentBlock struct {
-	Type    string          `json:"type"`
-	Text    string          `json:"text"`
-	Thinking string         `json:"thinking"`
-	Name    string          `json:"name"`
-	Input   json.RawMessage `json:"input"`
+	Type     string          `json:"type"`
+	Text     string          `json:"text"`
+	Thinking string          `json:"thinking"`
+	Name     string          `json:"name"`
+	Input    json.RawMessage `json:"input"`
 }
 
 // rawAgentInput is the input to the "Agent" tool_use.
@@ -67,14 +67,14 @@ type Turn struct {
 
 // DetailTurn is a full-fidelity turn for the detail view.
 type DetailTurn struct {
-	Role       string     // "user", "assistant", "system"
-	Content    string     // full text content
-	Thinking   string     // thinking block content (assistant only)
-	ToolCalls  []ToolCall // tool invocations (assistant only)
-	Model      string     // model used (assistant only)
-	TokensIn   int        // input tokens (assistant only)
-	TokensOut  int        // output tokens (assistant only)
-	Timestamp  string     // original timestamp
+	Role      string     // "user", "assistant", "system"
+	Content   string     // full text content
+	Thinking  string     // thinking block content (assistant only)
+	ToolCalls []ToolCall // tool invocations (assistant only)
+	Model     string     // model used (assistant only)
+	TokensIn  int        // input tokens (assistant only)
+	TokensOut int        // output tokens (assistant only)
+	Timestamp string     // original timestamp
 }
 
 // ToolCall represents a single tool invocation within a turn.

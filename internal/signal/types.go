@@ -35,11 +35,11 @@ const (
 type Signal struct {
 	ID           string         `json:"id"`
 	Type         SignalType     `json:"type"`
-	TraceID      string         `json:"trace_id"`    // empty for cross-trace signals (unused_installed_skill)
-	SpanIDs      []string       `json:"span_ids"`    // ordered; empty slice, never nil
-	Evidence     map[string]any `json:"evidence"`    // signal-type-specific payload (see §3)
-	Confidence   float64        `json:"confidence"`  // [0.0, 1.0]
-	EmittedAt    time.Time      `json:"emitted_at"`  // wall clock at extraction time
+	TraceID      string         `json:"trace_id"`      // empty for cross-trace signals (unused_installed_skill)
+	SpanIDs      []string       `json:"span_ids"`      // ordered; empty slice, never nil
+	Evidence     map[string]any `json:"evidence"`      // signal-type-specific payload (see §3)
+	Confidence   float64        `json:"confidence"`    // [0.0, 1.0]
+	EmittedAt    time.Time      `json:"emitted_at"`    // wall clock at extraction time
 	ProviderTier string         `json:"provider_tier"` // "full" | "aggregate" | "presence"
 }
 

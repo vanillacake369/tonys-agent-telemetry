@@ -65,20 +65,20 @@ type CatalogLoadedMsg struct {
 
 // SkillsTab implements TabModel for the Skills tab.
 type SkillsTab struct {
-	fetcher       *skill.Fetcher
-	localSkills   []skill.Skill // always available, loaded at init
-	githubSkills  []skill.Skill // fetched async on query >= 3 chars
-	skills        []skill.Skill // merged: local + github
-	filtered      []skill.Skill // after fuzzy filter
-	cursor        int
-	searchInput   textinput.Model
-	preview       string
-	sortBy        skill.SortBy
-	width         int
-	height        int
-	loading       bool // initial local load
-	githubLoading bool // github fetch in progress
-	err           error
+	fetcher         *skill.Fetcher
+	localSkills     []skill.Skill // always available, loaded at init
+	githubSkills    []skill.Skill // fetched async on query >= 3 chars
+	skills          []skill.Skill // merged: local + github
+	filtered        []skill.Skill // after fuzzy filter
+	cursor          int
+	searchInput     textinput.Model
+	preview         string
+	sortBy          skill.SortBy
+	width           int
+	height          int
+	loading         bool // initial local load
+	githubLoading   bool // github fetch in progress
+	err             error
 	cancelFn        context.CancelFunc
 	lastKeystroke   time.Time
 	lastPreviewURL  string // dedup: skip if same URL already fetched/fetching

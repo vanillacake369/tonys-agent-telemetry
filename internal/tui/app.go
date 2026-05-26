@@ -91,7 +91,7 @@ type App struct {
 	height        int
 	searchFocused bool // when true, key events pass directly to the active tab
 	whichKey      WhichKeyOverlay
-	detailView    *DetailView // non-nil when detail overlay is open
+	detailView    *DetailView        // non-nil when detail overlay is open
 	fifoEvents    <-chan event.Event // nil when FIFO is not active
 	fifoCtx       context.Context    // owns the lifecycle of fifo goroutines
 	fifoCancel    context.CancelFunc

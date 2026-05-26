@@ -68,7 +68,7 @@ func (w WhichKeyOverlay) View() string {
 	// Use the standard panel style for visual consistency with the rest of the UI.
 	// Add padding inside the panel so key columns are not flush against the border.
 	innerContent := lipgloss.NewStyle().Padding(1, 3).Render(content)
-	panelWidth := lipgloss.Width(innerContent) + 4  // +4 for left/right border chars + margin
+	panelWidth := lipgloss.Width(innerContent) + 4   // +4 for left/right border chars + margin
 	panelHeight := lipgloss.Height(innerContent) + 4 // +4 for top/bottom border + title line
 
 	return RenderPanel("Keybindings", innerContent, panelWidth, panelHeight, true)
