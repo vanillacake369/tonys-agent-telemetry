@@ -1,0 +1,70 @@
+name: Feature request
+description: Propose a new feature or a meaningful enhancement to an existing one.
+title: "feat: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: small UX tweaks and tiny additions often land
+        faster as PRs than as issues. If you can prototype it, please do.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: |
+        What pain are you hitting? Frame it as "I'm trying to X but Y is
+        in the way." Avoid framing as "the tool should do Z" — start
+        from the user goal.
+      placeholder: |
+        I'm trying to compare cost between two providers across a
+        single project, but the Cost tab groups by provider OR project,
+        not both at once.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: |
+        How would you solve it? Be specific about UX (which tab, which
+        key, what changes on screen) or API (new flag, new env var).
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: |
+        What else did you try / could one of the existing features
+        already cover this? If you bounced off the docs, mention which
+        section.
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Surface area
+      multiple: true
+      options:
+        - TUI (existing tab)
+        - TUI (new tab)
+        - CLI flag
+        - Env var
+        - New provider ingest
+        - Catalog / Advisor
+        - Trends / Signal store
+        - Control / Governance
+        - Release / Distribution
+        - Docs only
+
+  - type: checkboxes
+    id: willing
+    attributes:
+      label: Are you willing to send a PR?
+      options:
+        - label: Yes, I can prototype this
+        - label: Maybe, with guidance
+        - label: No, but I'd help test

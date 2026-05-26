@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or usage help
+    url: https://github.com/vanillacake369/tonys-agent-telemetry/discussions
+    about: Open a GitHub Discussion instead — issues are for defects and concrete proposals.
+  - name: Security report
+    url: https://github.com/vanillacake369/tonys-agent-telemetry/security/advisories/new
+    about: Use private vulnerability reporting — see SECURITY.md.

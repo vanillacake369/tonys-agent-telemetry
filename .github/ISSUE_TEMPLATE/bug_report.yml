@@ -1,0 +1,106 @@
+name: Bug report
+description: Something that worked is now broken, or worked differently than documented.
+title: "bug: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Please fill in as much as you can —
+        especially the version + OS + terminal — so triage doesn't have
+        to ask.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `tonys-agent-telemetry --version`
+      placeholder: tonys-agent-telemetry 0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: Install method
+      options:
+        - Homebrew (vanillacake369/tap)
+        - Nix flake
+        - Pre-built binary (.tar.gz / .deb / .rpm / .apk)
+        - go install
+        - Built from source
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS + terminal
+      description: e.g. macOS 15.2 / iTerm2, Ubuntu 24.04 / Alacritty, Windows 11 / WezTerm
+      placeholder: macOS 15.2 / iTerm2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: providers
+    attributes:
+      label: Provider(s) involved
+      description: Which auto-detected providers were active when the bug appeared.
+      multiple: true
+      options:
+        - Claude Code (~/.claude/projects/)
+        - OTLP receiver (:4318)
+        - vLLM
+        - Ollama
+        - None / not relevant
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: |
+        Minimal numbered steps. Include any non-default env vars
+        (`TONYS_OTLP_BIND`, `TONYS_MAX_SPANS`, `TONYS_SIGNAL_STORE`, etc.).
+      placeholder: |
+        1. Launch with `TONYS_MAX_SPANS=10 ./bin/tonys-agent-telemetry`
+        2. Press 5 to switch to the DAG tab
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: |
+        Include screenshots, GIFs, or pasted terminal output. For
+        rendering bugs, paste the `View()` output if you can capture it
+        — instructions in docs/troubleshooting.md.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (optional)
+      description: |
+        If reproducible with `TAT_DEBUG=1`, paste relevant lines from
+        `/tmp/tat-debug.log`. Redact API keys and personal paths.
+      render: shell
+
+  - type: checkboxes
+    id: search
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I searched existing issues and didn't find a duplicate
+          required: true
+        - label: I'm on the latest release (or the issue exists on `main`)
+          required: true
