@@ -2,11 +2,25 @@ package skill
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"testing"
 )
 
+// skipUnlessLive skips the registry tests when running on CI or without
+// TONYS_RUN_LIVE=1 — they call the real GitHub API via `gh`, which is
+// rate-limited / unauthenticated under the default GH Actions token in
+// ways that make these tests flaky as a gate. Run locally with
+// TONYS_RUN_LIVE=1 to exercise.
+func skipUnlessLive(t *testing.T) {
+	t.Helper()
+	if os.Getenv("TONYS_RUN_LIVE") != "1" || os.Getenv("CI") == "true" {
+		t.Skip("live registry test — set TONYS_RUN_LIVE=1 and unset CI to run")
+	}
+}
+
 func TestSearchRegistries_ReturnsSkills(t *testing.T) {
+	skipUnlessLive(t)
 	if _, err := exec.LookPath("gh"); err != nil {
 		t.Skip("gh not available")
 	}
@@ -30,6 +44,7 @@ func TestSearchRegistries_ReturnsSkills(t *testing.T) {
 }
 
 func TestSearchRegistries_FiltersByQuery(t *testing.T) {
+	skipUnlessLive(t)
 	if _, err := exec.LookPath("gh"); err != nil {
 		t.Skip("gh not available")
 	}
@@ -48,6 +63,7 @@ func TestSearchRegistries_FiltersByQuery(t *testing.T) {
 }
 
 func TestSearchRegistries_SkipsDeprecated(t *testing.T) {
+	skipUnlessLive(t)
 	if _, err := exec.LookPath("gh"); err != nil {
 		t.Skip("gh not available")
 	}
